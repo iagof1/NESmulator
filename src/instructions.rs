@@ -17,64 +17,6 @@ pub enum AddressMode {
 }
 
 impl CPU {
-    fn get_operand(&mut self, mode: AddressMode) -> (u16, u8) {
-        let (addr, value) = match mode {
-            AddressMode::Immediate => (0, self.fetch_byte()),
-            AddressMode::ZeroPage => {
-                let addr = self.fetch_byte() as u16;
-                (addr, self.read_byte(addr))
-            }
-            AddressMode::ZeroPageX => {
-                let addr = self.fetch_byte().wrapping_add(self.x) as u16;
-                (addr, self.read_byte(addr))
-            }
-            AddressMode::ZeroPageY => {
-                let addr = self.fetch_byte().wrapping_add(self.y) as u16;
-                (addr, self.read_byte(addr))
-            }
-            AddressMode::Absolute => {
-                let addr = self.fetch_word();
-                (addr, self.read_byte(addr))
-            }
-            AddressMode::AbsoluteX => {
-                let addr = self.fetch_word().wrapping_add(self.x as u16);
-                (addr, self.read_byte(addr))
-            }
-            AddressMode::AbsoluteY => {
-                let addr = self.fetch_word().wrapping_add(self.y as u16);
-                (addr, self.read_byte(addr))
-            }
-            AddressMode::Indirect => {
-                let addr = self.fetch_word();
-                let lo = self.read_byte(addr) as u16;
-                let hi = self.read_byte(addr.wrapping_add(1)) as u16;
-                let indirect_addr = (hi << 8) | lo;
-                (indirect_addr, self.read_byte(addr))
-            }
-            AddressMode::IndirectX => {
-                let base = self.fetch_byte().wrapping_add(self.x);
-                let lo = self.read_byte(base as u16) as u16;
-                let hi = self.read_byte(base.wrapping_add(1) as u16) as u16;
-                let addr = (hi << 8) | lo;
-                (addr, self.read_byte(addr))
-            }
-            AddressMode::IndirectY => {
-                let base = self.fetch_byte();
-                let lo = self.read_byte(base as u16) as u16;
-                let hi = self.read_byte(base.wrapping_add(1) as u16) as u16;
-                let addr = ((hi << 8) | lo).wrapping_add(self.y as u16);
-                (addr, self.read_byte(addr))
-            }
-            AddressMode::Relative => {
-                let offset = self.fetch_byte() as i8;
-                let addr = self.pc.wrapping_add(offset as u16);
-                (addr, self.read_byte(addr))
-            }
-            AddressMode::Accumulator => (0, self.a),
-        };
-
-        (addr, value)
-    }
     pub fn adc(&mut self, mode: AddressMode) {
         let (_, value) = self.get_operand(mode);
 
@@ -348,20 +290,8 @@ impl CPU {
     }
 
     pub fn jmp(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::Absolute => {
-                let addr = self.fetch_word();
-                self.pc = addr;
-            }
-            AddressMode::Indirect => {
-                let base = self.fetch_word();
-                let lo = self.read_byte(base) as u16;
-                let hi = self.read_byte(base.wrapping_add(1)) as u16;
-                let addr = (hi << 8) | lo;
-                self.pc = addr;
-            }
-            _ => unimplemented!(),
-        }
+        let (addr, _) = self.get_operand(mode);
+        self.pc = addr;
     }
 
     pub fn jsr(&mut self) {
@@ -371,43 +301,15 @@ impl CPU {
     }
 
     pub fn lsr(&mut self, mode: AddressMode) {
-        let (value, result) = match mode {
-            AddressMode::Accumulator => {
-                let value = self.a;
-                self.a >>= 1;
-                (value, self.a)
-            }
-            AddressMode::ZeroPage => {
-                let addr = self.fetch_byte() as u16;
-                let value = self.read_byte(addr);
-                let result = value >> 1;
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            AddressMode::ZeroPageX => {
-                let addr = self.fetch_byte().wrapping_add(self.x) as u16;
-                let value = self.read_byte(addr);
-                let result = value >> 1;
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            AddressMode::Absolute => {
-                let addr = self.fetch_word();
-                let value = self.read_byte(addr);
-                let result = value >> 1;
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            AddressMode::AbsoluteX => {
-                let addr = self.fetch_word().wrapping_add(self.x as u16) as u16;
-                let value = self.read_byte(addr);
-                let result = value >> 1;
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            _ => unimplemented!(),
-        };
+        let (addr, value) = self.get_operand(mode);
 
+        let result = value >> 1;
+
+        if addr != 0 {
+            self.memory[addr as usize] = result;
+        } else {
+            self.a = result;
+        }
         self.status.set(StatusFlags::CARRY, value & 0x01 != 0);
         self.status.set(StatusFlags::ZERO, result == 0);
         self.status.set(StatusFlags::NEGATIVE, false);
@@ -453,42 +355,14 @@ impl CPU {
     }
 
     pub fn ror(&mut self, mode: AddressMode) {
-        let (value, result) = match mode {
-            AddressMode::Accumulator => {
-                let value = self.a;
-                self.a = self.rotate_right(value);
-                (value, self.a)
-            }
-            AddressMode::ZeroPage => {
-                let addr = self.fetch_byte() as u16;
-                let value = self.read_byte(addr);
-                let result = self.rotate_right(value);
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            AddressMode::ZeroPageX => {
-                let addr = self.fetch_byte().wrapping_add(self.x) as u16;
-                let value = self.read_byte(addr);
-                let result = self.rotate_right(value);
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            AddressMode::Absolute => {
-                let addr = self.fetch_word();
-                let value = self.read_byte(addr);
-                let result = self.rotate_right(value);
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            AddressMode::AbsoluteX => {
-                let addr = self.fetch_word().wrapping_add(self.x as u16);
-                let value = self.read_byte(addr);
-                let result = self.rotate_right(value);
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            _ => unimplemented!(),
-        };
+        let (addr, value) = self.get_operand(mode);
+        let result = self.rotate_right(value);
+
+        if addr != 0 {
+            self.memory[addr as usize] = result;
+        } else {
+            self.a = result;
+        }
 
         self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
         self.status.set(StatusFlags::ZERO, result == 0);
@@ -496,42 +370,14 @@ impl CPU {
     }
 
     pub fn rol(&mut self, mode: AddressMode) {
-        let (value, result) = match mode {
-            AddressMode::Accumulator => {
-                let value = self.a;
-                self.a = self.rotate_left(value);
-                (value, self.a)
-            }
-            AddressMode::ZeroPage => {
-                let addr = self.fetch_byte() as u16;
-                let value = self.read_byte(addr);
-                let result = self.rotate_left(value);
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            AddressMode::ZeroPageX => {
-                let addr = self.fetch_byte().wrapping_add(self.x) as u16;
-                let value = self.read_byte(addr);
-                let result = self.rotate_left(value);
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            AddressMode::Absolute => {
-                let addr = self.fetch_word();
-                let value = self.read_byte(addr);
-                let result = self.rotate_left(value);
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            AddressMode::AbsoluteX => {
-                let addr = self.fetch_word().wrapping_add(self.x as u16);
-                let value = self.read_byte(addr);
-                let result = self.rotate_left(value);
-                self.memory[addr as usize] = result;
-                (value, result)
-            }
-            _ => unimplemented!(),
-        };
+        let (addr, value) = self.get_operand(mode);
+        let result = self.rotate_left(value);
+
+        if addr != 0 {
+            self.memory[addr as usize] = result;
+        } else {
+            self.a = result;
+        }
 
         self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
         self.status.set(StatusFlags::ZERO, result == 0);

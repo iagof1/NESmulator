@@ -104,6 +104,65 @@ impl CPU {
         }
     }
 
+    pub fn get_operand(&mut self, mode: AddressMode) -> (u16, u8) {
+        let (addr, value) = match mode {
+            AddressMode::Immediate => (0, self.fetch_byte()),
+            AddressMode::ZeroPage => {
+                let addr = self.fetch_byte() as u16;
+                (addr, self.read_byte(addr))
+            }
+            AddressMode::ZeroPageX => {
+                let addr = self.fetch_byte().wrapping_add(self.x) as u16;
+                (addr, self.read_byte(addr))
+            }
+            AddressMode::ZeroPageY => {
+                let addr = self.fetch_byte().wrapping_add(self.y) as u16;
+                (addr, self.read_byte(addr))
+            }
+            AddressMode::Absolute => {
+                let addr = self.fetch_word();
+                (addr, self.read_byte(addr))
+            }
+            AddressMode::AbsoluteX => {
+                let addr = self.fetch_word().wrapping_add(self.x as u16);
+                (addr, self.read_byte(addr))
+            }
+            AddressMode::AbsoluteY => {
+                let addr = self.fetch_word().wrapping_add(self.y as u16);
+                (addr, self.read_byte(addr))
+            }
+            AddressMode::Indirect => {
+                let addr = self.fetch_word();
+                let lo = self.read_byte(addr) as u16;
+                let hi = self.read_byte(addr.wrapping_add(1)) as u16;
+                let indirect_addr = (hi << 8) | lo;
+                (indirect_addr, self.read_byte(addr))
+            }
+            AddressMode::IndirectX => {
+                let base = self.fetch_byte().wrapping_add(self.x);
+                let lo = self.read_byte(base as u16) as u16;
+                let hi = self.read_byte(base.wrapping_add(1) as u16) as u16;
+                let addr = (hi << 8) | lo;
+                (addr, self.read_byte(addr))
+            }
+            AddressMode::IndirectY => {
+                let base = self.fetch_byte();
+                let lo = self.read_byte(base as u16) as u16;
+                let hi = self.read_byte(base.wrapping_add(1) as u16) as u16;
+                let addr = ((hi << 8) | lo).wrapping_add(self.y as u16);
+                (addr, self.read_byte(addr))
+            }
+            AddressMode::Relative => {
+                let offset = self.fetch_byte() as i8;
+                let addr = self.pc.wrapping_add(offset as u16);
+                (addr, self.read_byte(addr))
+            }
+            AddressMode::Accumulator => (0, self.a),
+        };
+
+        (addr, value)
+    }
+
     pub fn get_cycle_count(&self, opcode: u8) -> u16 {
         match opcode {
             0x00 => 7,
