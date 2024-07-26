@@ -1,4 +1,0 @@
-CPU 6052 Addressing modes:
-- If the opcode has 2 bytes then we can already filter the addressing modes to immediate, zeropage, zeropage,x, indirect,x and indirect,y.
-- If the opcode has 3 bytes then we can already filter the addressing modes to absolute, absolute,x and absolute,y.
-
