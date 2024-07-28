@@ -16,6 +16,16 @@ pub enum AddressMode {
     Relative,
 }
 
+macro_rules! logical {
+    ($fn_name:ident, $op:tt) => {
+        pub fn $fn_name(&mut self, mode: AddressMode) {
+            let (_, value) = self.get_operand(mode);
+            self.a = self.a $op value;
+            self.update_zero_and_negative_flags(self.a);
+        }
+    };
+}
+
 macro_rules! load_register {
     ($fn_name:ident, $reg:ident) => {
         pub fn $fn_name(&mut self, mode: AddressMode) {
@@ -55,6 +65,25 @@ macro_rules! compare {
             self.status.set(StatusFlags::CARRY, self.$reg >= value);
             self.status.set(StatusFlags::ZERO, self.$reg == value);
             self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
+        }
+    };
+}
+
+macro_rules! rotate {
+    ($fn_name:ident, $rotate_fn:ident, $carry_check:expr) => {
+        pub fn $fn_name(&mut self, mode: AddressMode) {
+            let (addr, value) = self.get_operand(mode);
+            let result = self.$rotate_fn(value);
+
+            if addr != 0 {
+                self.memory[addr as usize] = result;
+            } else {
+                self.a = result;
+            }
+
+            self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
+            self.status.set(StatusFlags::ZERO, result == 0);
+            self.status.set(StatusFlags::CARRY, $carry_check(value));
         }
     };
 }
@@ -111,10 +140,10 @@ macro_rules! decrement {
     };
 }
 
-macro_rules! clear_flag {
-    ($fn_name:ident, $flag:ident) => {
+macro_rules! set_flag {
+    ($fn_name:ident, $flag:ident, $value:expr) => {
         pub fn $fn_name(&mut self) {
-            self.status.set(StatusFlags::$flag, false);
+            self.status.set(StatusFlags::$flag, $value);
         }
     };
 }
@@ -131,6 +160,13 @@ impl CPU {
     compare!(cmp, a);
     compare!(cpx, x);
     compare!(cpy, y);
+
+    logical!(and, &);
+    logical!(eor, ^);
+    logical!(ora, |);
+
+    rotate!(ror, rotate_right, |value| value & 0x01 != 0);
+    rotate!(rol, rotate_left, |value| value & 0x80 != 0);
 
     load_register!(lda, a);
     load_register!(ldx, x);
@@ -155,10 +191,14 @@ impl CPU {
     branch!(bvc, OVERFLOW, |v: bool| !v);
     branch!(bvs, OVERFLOW, |v| v);
 
-    clear_flag!(clc, CARRY);
-    clear_flag!(cld, DECIMAL);
-    clear_flag!(cli, INTERRUPT);
-    clear_flag!(clv, OVERFLOW);
+    set_flag!(clc, CARRY, false);
+    set_flag!(cld, DECIMAL, false);
+    set_flag!(cli, INTERRUPT, false);
+    set_flag!(clv, OVERFLOW, false);
+
+    set_flag!(sec, CARRY, true);
+    set_flag!(sed, DECIMAL, true);
+    set_flag!(sei, INTERRUPT, true);
 
     pub fn adc(&mut self, mode: AddressMode) {
         let (_, value) = self.get_operand(mode);
@@ -184,27 +224,6 @@ impl CPU {
             self.a = value;
         }
         self.update_zero_and_negative_flags(value);
-    }
-
-    pub fn and(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-
-        self.a &= value;
-        self.update_zero_and_negative_flags(self.a);
-    }
-
-    pub fn ora(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-
-        self.a |= value;
-        self.update_zero_and_negative_flags(value);
-    }
-
-    pub fn eor(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-
-        self.a ^= value;
-        self.update_zero_and_negative_flags(self.a);
     }
 
     pub fn bit(&mut self, mode: AddressMode) {
@@ -272,36 +291,6 @@ impl CPU {
         self.status.remove(StatusFlags::UNUSED);
     }
 
-    pub fn ror(&mut self, mode: AddressMode) {
-        let (addr, value) = self.get_operand(mode);
-        let result = self.rotate_right(value);
-
-        if addr != 0 {
-            self.memory[addr as usize] = result;
-        } else {
-            self.a = result;
-        }
-
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-        self.status.set(StatusFlags::ZERO, result == 0);
-        self.status.set(StatusFlags::CARRY, value & 0x01 != 0);
-    }
-
-    pub fn rol(&mut self, mode: AddressMode) {
-        let (addr, value) = self.get_operand(mode);
-        let result = self.rotate_left(value);
-
-        if addr != 0 {
-            self.memory[addr as usize] = result;
-        } else {
-            self.a = result;
-        }
-
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-        self.status.set(StatusFlags::ZERO, result == 0);
-        self.status.set(StatusFlags::CARRY, value & 0x80 != 0);
-    }
-
     pub fn rti(&mut self) {
         self.status = StatusFlags::from_bits_truncate(self.pop());
         self.status.remove(StatusFlags::BREAK | StatusFlags::UNUSED);
@@ -321,11 +310,7 @@ impl CPU {
     pub fn sbc(&mut self, mode: AddressMode) {
         let (_, value) = self.get_operand(mode);
 
-        let carry = if self.status.contains(StatusFlags::CARRY) {
-            0
-        } else {
-            1
-        };
+        let carry = !self.status.contains(StatusFlags::CARRY) as u8;
         let result = self.a.wrapping_sub(value).wrapping_sub(carry);
 
         self.status
@@ -341,17 +326,5 @@ impl CPU {
 
     pub fn txs(&mut self) {
         self.sp = self.x;
-    }
-
-    pub fn sec(&mut self) {
-        self.status.set(StatusFlags::CARRY, true);
-    }
-
-    pub fn sed(&mut self) {
-        self.status.set(StatusFlags::DECIMAL, true);
-    }
-
-    pub fn sei(&mut self) {
-        self.status.set(StatusFlags::INTERRUPT, true);
     }
 }
