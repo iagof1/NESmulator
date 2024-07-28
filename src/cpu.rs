@@ -533,19 +533,8 @@ impl CPU {
     }
 
     pub fn update_zero_and_negative_flags(&mut self, value: u8) {
-        // set zero flag
-        if value == 0 {
-            self.status.insert(StatusFlags::ZERO);
-        } else {
-            self.status.remove(StatusFlags::ZERO);
-        }
-
-        // set negative flag
-        if StatusFlags::NEGATIVE.bits() & value != 0 {
-            self.status.insert(StatusFlags::NEGATIVE);
-        } else {
-            self.status.remove(StatusFlags::NEGATIVE);
-        }
+        self.status.set(StatusFlags::ZERO, value == 0);
+        self.status.set(StatusFlags::NEGATIVE, value & 0x80 != 0);
     }
 
     pub fn update_carry_flag(&mut self, sum: u16) {

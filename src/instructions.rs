@@ -16,95 +16,162 @@ pub enum AddressMode {
     Relative,
 }
 
+macro_rules! load_register {
+    ($fn_name:ident, $reg:ident) => {
+        pub fn $fn_name(&mut self, mode: AddressMode) {
+            let (_, value) = self.get_operand(mode);
+            self.$reg = value;
+            self.update_zero_and_negative_flags(self.$reg);
+        }
+    };
+}
+
+macro_rules! branch {
+    ($fn_name:ident, $flag:ident, $condition:expr) => {
+        pub fn $fn_name(&mut self, mode: AddressMode) {
+            match mode {
+                AddressMode::Relative => {
+                    let offset = self.fetch_byte() as i8;
+                    if $condition(self.status.contains(StatusFlags::$flag)) {
+                        self.pc = self.pc.wrapping_add(offset as u16);
+                    }
+                }
+                _ => panic!(
+                    "Addressing mode not supported for {} instruction",
+                    stringify!($fn_name)
+                ),
+            }
+        }
+    };
+}
+
+macro_rules! compare {
+    ($fn_name:ident, $reg:ident) => {
+        pub fn $fn_name(&mut self, mode: AddressMode) {
+            let (_, value) = self.get_operand(mode);
+
+            let result = self.$reg.wrapping_sub(value);
+
+            self.status.set(StatusFlags::CARRY, self.$reg >= value);
+            self.status.set(StatusFlags::ZERO, self.$reg == value);
+            self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
+        }
+    };
+}
+
+macro_rules! store {
+    ($fn_name:ident, $reg:ident) => {
+        pub fn $fn_name(&mut self, mode: AddressMode) {
+            let (addr, _) = self.get_operand(mode);
+            self.memory[addr as usize] = self.$reg;
+        }
+    };
+}
+
+macro_rules! transfer {
+    ($fn_name:ident, $source:ident, $dest:ident) => {
+        pub fn $fn_name(&mut self) {
+            self.$dest = self.$source;
+            self.update_zero_and_negative_flags(self.$dest);
+        }
+    };
+}
+
+macro_rules! increment {
+    (inc, $reg:ident) => {
+        pub fn inc(&mut self, mode: AddressMode) {
+            let (addr, mut value) = self.get_operand(mode);
+            value = value.wrapping_add(1);
+            self.memory[addr as usize] = value;
+            self.update_zero_and_negative_flags(value);
+        }
+    };
+    ($fn_name:ident, $reg:ident) => {
+        pub fn $fn_name(&mut self) {
+            self.$reg = self.$reg.wrapping_add(1);
+            self.update_zero_and_negative_flags(self.$reg);
+        }
+    };
+}
+
+macro_rules! decrement {
+    (dec, $reg:ident) => {
+        pub fn dec(&mut self, mode: AddressMode) {
+            let (addr, mut value) = self.get_operand(mode);
+            value = value.wrapping_sub(1);
+            self.memory[addr as usize] = value;
+            self.update_zero_and_negative_flags(value);
+        }
+    };
+    ($fn_name:ident, $reg:ident) => {
+        pub fn $fn_name(&mut self) {
+            self.$reg = self.$reg.wrapping_sub(1);
+            self.update_zero_and_negative_flags(self.$reg);
+        }
+    };
+}
+
+macro_rules! clear_flag {
+    ($fn_name:ident, $flag:ident) => {
+        pub fn $fn_name(&mut self) {
+            self.status.set(StatusFlags::$flag, false);
+        }
+    };
+}
+
 impl CPU {
+    increment!(inc, addr);
+    increment!(inx, x);
+    increment!(iny, y);
+
+    decrement!(dec, addr);
+    decrement!(dex, x);
+    decrement!(dey, y);
+
+    compare!(cmp, a);
+    compare!(cpx, x);
+    compare!(cpy, y);
+
+    load_register!(lda, a);
+    load_register!(ldx, x);
+    load_register!(ldy, y);
+
+    store!(sta, a);
+    store!(stx, x);
+    store!(sty, y);
+
+    transfer!(tax, a, x);
+    transfer!(tay, a, y);
+    transfer!(tsx, sp, x);
+    transfer!(txa, x, a);
+    transfer!(tya, y, a);
+
+    branch!(bcc, CARRY, |c: bool| !c);
+    branch!(bcs, CARRY, |c: bool| c);
+    branch!(beq, ZERO, |z: bool| z);
+    branch!(bmi, NEGATIVE, |n: bool| n);
+    branch!(bne, ZERO, |z: bool| !z);
+    branch!(bpl, NEGATIVE, |n: bool| !n);
+    branch!(bvc, OVERFLOW, |v: bool| !v);
+    branch!(bvs, OVERFLOW, |v| v);
+
+    clear_flag!(clc, CARRY);
+    clear_flag!(cld, DECIMAL);
+    clear_flag!(cli, INTERRUPT);
+    clear_flag!(clv, OVERFLOW);
+
     pub fn adc(&mut self, mode: AddressMode) {
         let (_, value) = self.get_operand(mode);
 
-        let carry = if self.status.contains(StatusFlags::CARRY) {
-            1
-        } else {
-            0
-        };
+        let carry = self.status.contains(StatusFlags::CARRY) as u16;
         let sum = self.a as u16 + value as u16 + carry;
         let result = sum as u8;
 
-        // Update accumulator
         self.a = result;
 
-        // Update flags
         self.update_zero_and_negative_flags(self.a);
         self.update_carry_flag(sum);
         self.update_overflow_flag(value, result);
-    }
-
-    pub fn cmp(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-
-        let result = self.a.wrapping_sub(value);
-
-        self.status.set(StatusFlags::CARRY, self.a >= value);
-        self.status.set(StatusFlags::ZERO, self.a == value);
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-    }
-
-    pub fn cpx(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-
-        let result = self.x.wrapping_sub(value);
-
-        self.status.set(StatusFlags::CARRY, self.x >= value);
-        self.status.set(StatusFlags::ZERO, self.x == value);
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-    }
-
-    pub fn cpy(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-
-        let result = self.y.wrapping_sub(value);
-
-        self.status.set(StatusFlags::CARRY, self.y >= value);
-        self.status.set(StatusFlags::ZERO, self.y == value);
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-    }
-
-    pub fn lda(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-        self.a = value;
-        self.update_zero_and_negative_flags(self.a);
-    }
-
-    pub fn ldx(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-        self.x = value;
-        self.update_zero_and_negative_flags(self.x);
-    }
-
-    pub fn ldy(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-        self.y = value;
-        self.update_zero_and_negative_flags(self.y);
-    }
-
-    pub fn and(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-
-        self.a &= value;
-        self.update_zero_and_negative_flags(self.a);
-    }
-
-    pub fn ora(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-
-        self.a |= value;
-        self.status.set(StatusFlags::ZERO, self.a == 0);
-        self.status.set(StatusFlags::NEGATIVE, self.a & 0x80 != 0);
-    }
-
-    pub fn eor(&mut self, mode: AddressMode) {
-        let (_, value) = self.get_operand(mode);
-
-        self.a ^= value;
-        self.update_zero_and_negative_flags(self.a);
     }
 
     pub fn asl(&mut self, mode: AddressMode) {
@@ -119,100 +186,25 @@ impl CPU {
         self.update_zero_and_negative_flags(value);
     }
 
-    pub fn bcc(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::Relative => {
-                let offset = self.fetch_byte() as i8;
-                if !self.status.contains(StatusFlags::CARRY) {
-                    self.pc = self.pc.wrapping_add(offset as u16);
-                }
-            }
-            _ => panic!("Addressing mode not supported for BCC instruction"),
-        }
+    pub fn and(&mut self, mode: AddressMode) {
+        let (_, value) = self.get_operand(mode);
+
+        self.a &= value;
+        self.update_zero_and_negative_flags(self.a);
     }
 
-    pub fn bcs(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::Relative => {
-                let offset = self.fetch_byte() as i8;
-                if self.status.contains(StatusFlags::CARRY) {
-                    self.pc = self.pc.wrapping_add(offset as u16);
-                }
-            }
-            _ => panic!("Addressing mode not supported for BCS instruction"),
-        }
+    pub fn ora(&mut self, mode: AddressMode) {
+        let (_, value) = self.get_operand(mode);
+
+        self.a |= value;
+        self.update_zero_and_negative_flags(value);
     }
 
-    pub fn beq(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::Relative => {
-                let offset = self.fetch_byte() as i8;
-                if self.status.contains(StatusFlags::ZERO) {
-                    self.pc = self.pc.wrapping_add(offset as u16);
-                }
-            }
-            _ => panic!("Addressing mode not supported for BEQ instruction"),
-        }
-    }
+    pub fn eor(&mut self, mode: AddressMode) {
+        let (_, value) = self.get_operand(mode);
 
-    pub fn bmi(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::Relative => {
-                let offset = self.fetch_byte() as i8;
-                if self.status.contains(StatusFlags::NEGATIVE) {
-                    self.pc = self.pc.wrapping_add(offset as u16);
-                }
-            }
-            _ => panic!("Addressing mode not supported for BMI instruction"),
-        }
-    }
-
-    pub fn bne(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::Relative => {
-                let offset = self.fetch_byte() as i8;
-                if !self.status.contains(StatusFlags::ZERO) {
-                    self.pc = self.pc.wrapping_add(offset as u16);
-                }
-            }
-            _ => panic!("Addressing mode not supported for BNE instruction"),
-        }
-    }
-
-    pub fn bpl(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::Relative => {
-                let offset = self.fetch_byte() as i8;
-                if !self.status.contains(StatusFlags::NEGATIVE) {
-                    self.pc = self.pc.wrapping_add(offset as u16);
-                }
-            }
-            _ => panic!("Addressing mode not supported for BPL instruction"),
-        }
-    }
-
-    pub fn bvc(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::Relative => {
-                let offset = self.fetch_byte() as i8;
-                if !self.status.contains(StatusFlags::OVERFLOW) {
-                    self.pc = self.pc.wrapping_add(offset as u16);
-                }
-            }
-            _ => panic!("Addressing mode not supported for BVC instruction"),
-        }
-    }
-
-    pub fn bvs(&mut self, mode: AddressMode) {
-        match mode {
-            AddressMode::Relative => {
-                let offset = self.fetch_byte() as i8;
-                if self.status.contains(StatusFlags::OVERFLOW) {
-                    self.pc = self.pc.wrapping_add(offset as u16);
-                }
-            }
-            _ => panic!("Addressing mode not supported for BVS instruction"),
-        }
+        self.a ^= value;
+        self.update_zero_and_negative_flags(self.a);
     }
 
     pub fn bit(&mut self, mode: AddressMode) {
@@ -220,64 +212,6 @@ impl CPU {
         self.status.set(StatusFlags::ZERO, (self.a & value) == 0);
         self.status.set(StatusFlags::NEGATIVE, (value & 0x80) != 0);
         self.status.set(StatusFlags::OVERFLOW, (value & 0x40) != 0);
-    }
-
-    pub fn dec(&mut self, mode: AddressMode) {
-        let (addr, value) = self.get_operand(mode);
-
-        let result = value.wrapping_sub(1);
-
-        self.memory[addr as usize] = result;
-
-        self.status.set(StatusFlags::ZERO, result == 0);
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-    }
-
-    pub fn dex(&mut self) {
-        let result = self.x.wrapping_sub(1);
-
-        self.x = result;
-
-        self.status.set(StatusFlags::ZERO, result == 0);
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-    }
-
-    pub fn dey(&mut self) {
-        let result = self.y.wrapping_sub(1);
-
-        self.y = result;
-
-        self.status.set(StatusFlags::ZERO, result == 0);
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-    }
-
-    pub fn inc(&mut self, mode: AddressMode) {
-        let (addr, value) = self.get_operand(mode);
-
-        let result = value.wrapping_add(1);
-
-        self.memory[addr as usize] = result;
-
-        self.status.set(StatusFlags::ZERO, result == 0);
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-    }
-
-    pub fn inx(&mut self) {
-        let result = self.x.wrapping_add(1);
-
-        self.x = result;
-
-        self.status.set(StatusFlags::ZERO, result == 0);
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-    }
-
-    pub fn iny(&mut self) {
-        let result = self.y.wrapping_add(1);
-
-        self.y = result;
-
-        self.status.set(StatusFlags::ZERO, result == 0);
-        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
     }
 
     pub fn brk(&mut self) {
@@ -313,22 +247,6 @@ impl CPU {
         self.status.set(StatusFlags::CARRY, value & 0x01 != 0);
         self.status.set(StatusFlags::ZERO, result == 0);
         self.status.set(StatusFlags::NEGATIVE, false);
-    }
-
-    pub fn clc(&mut self) {
-        self.status.set(StatusFlags::CARRY, false);
-    }
-
-    pub fn cld(&mut self) {
-        self.status.set(StatusFlags::DECIMAL, false);
-    }
-
-    pub fn cli(&mut self) {
-        self.status.set(StatusFlags::INTERRUPT, false);
-    }
-
-    pub fn clv(&mut self) {
-        self.status.set(StatusFlags::OVERFLOW, false);
     }
 
     pub fn nop(&mut self) {}
@@ -421,48 +339,8 @@ impl CPU {
         self.a = result;
     }
 
-    pub fn sta(&mut self, mode: AddressMode) {
-        let (addr, _) = self.get_operand(mode);
-        self.memory[addr as usize] = self.a;
-    }
-
-    pub fn stx(&mut self, mode: AddressMode) {
-        let (addr, _) = self.get_operand(mode);
-        self.memory[addr as usize] = self.x;
-    }
-
-    pub fn sty(&mut self, mode: AddressMode) {
-        let (addr, _) = self.get_operand(mode);
-        self.memory[addr as usize] = self.y;
-    }
-
-    pub fn tax(&mut self) {
-        self.x = self.a;
-        self.update_zero_and_negative_flags(self.x);
-    }
-
-    pub fn tay(&mut self) {
-        self.y = self.a;
-        self.update_zero_and_negative_flags(self.y);
-    }
-
-    pub fn tsx(&mut self) {
-        self.x = self.sp;
-        self.update_zero_and_negative_flags(self.x);
-    }
-
-    pub fn txa(&mut self) {
-        self.a = self.x;
-        self.update_zero_and_negative_flags(self.a);
-    }
-
     pub fn txs(&mut self) {
         self.sp = self.x;
-    }
-
-    pub fn tya(&mut self) {
-        self.a = self.y;
-        self.update_zero_and_negative_flags(self.a);
     }
 
     pub fn sec(&mut self) {
