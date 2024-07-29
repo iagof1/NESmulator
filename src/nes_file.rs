@@ -1,18 +1,18 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 
-pub struct NesFile {
-    pub prg_rom: Vec<u8>,
-    pub chr_rom: Vec<u8>,
-    pub mapper: u8,
-    pub mirroring: Mirroring,
-}
-
 #[derive(Debug)]
 pub enum Mirroring {
     Horizontal,
     Vertical,
     FourScreen,
+}
+
+pub struct NesFile {
+    pub prg_rom: Vec<u8>,
+    pub chr_rom: Vec<u8>,
+    pub mapper: u8,
+    pub mirroring: Mirroring,
 }
 
 impl NesFile {
