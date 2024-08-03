@@ -1,4 +1,3 @@
-use crate::bus::MemoryBus;
 use crate::cpu::{StatusFlags, CPU};
 
 #[derive(Debug)]
