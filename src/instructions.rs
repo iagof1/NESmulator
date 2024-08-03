@@ -1,3 +1,4 @@
+use crate::bus::MemoryBus;
 use crate::cpu::{StatusFlags, CPU};
 
 #[derive(Debug)]
@@ -61,7 +62,6 @@ macro_rules! compare {
             let (_, value) = self.get_operand(mode);
 
             let result = self.$reg.wrapping_sub(value);
-
             self.status.set(StatusFlags::CARRY, self.$reg >= value);
             self.status.set(StatusFlags::ZERO, self.$reg == value);
             self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
@@ -76,7 +76,7 @@ macro_rules! rotate {
             let result = self.$rotate_fn(value);
 
             if addr != 0 {
-                self.memory[addr as usize] = result;
+                self.memory_bus.cpu_write(addr, result);
             } else {
                 self.a = result;
             }
@@ -92,7 +92,7 @@ macro_rules! store {
     ($fn_name:ident, $reg:ident) => {
         pub fn $fn_name(&mut self, mode: AddressMode) {
             let (addr, _) = self.get_operand(mode);
-            self.memory[addr as usize] = self.$reg;
+            self.memory_bus.cpu_write(addr, self.$reg);
         }
     };
 }
@@ -111,7 +111,7 @@ macro_rules! increment {
         pub fn inc(&mut self, mode: AddressMode) {
             let (addr, mut value) = self.get_operand(mode);
             value = value.wrapping_add(1);
-            self.memory[addr as usize] = value;
+            self.memory_bus.cpu_write(addr, value);
             self.update_zero_and_negative_flags(value);
         }
     };
@@ -128,7 +128,7 @@ macro_rules! decrement {
         pub fn dec(&mut self, mode: AddressMode) {
             let (addr, mut value) = self.get_operand(mode);
             value = value.wrapping_sub(1);
-            self.memory[addr as usize] = value;
+            self.memory_bus.cpu_write(addr, value);
             self.update_zero_and_negative_flags(value);
         }
     };
@@ -219,7 +219,7 @@ impl CPU {
         self.status.set(StatusFlags::CARRY, (value & 0x80) != 0);
         value <<= 1;
         if addr != 0 {
-            self.memory[addr as usize] = value;
+            self.memory_bus.cpu_write(addr, value);
         } else {
             self.a = value;
         }
@@ -239,7 +239,11 @@ impl CPU {
         self.status.insert(StatusFlags::BREAK);
         self.status.insert(StatusFlags::INTERRUPT);
         self.push_status();
-        self.pc = self.read_word(0xFFFE); // Read the interrupt vector address from 0xFFFE/0xFFFF
+
+        // Read the interrupt vector address from 0xFFFE/0xFFFF
+        let lo = self.memory_bus.cpu_read(0xFFFE) as u16;
+        let hi = self.memory_bus.cpu_read(0xFFFF) as u16;
+        self.pc = (hi << 8) | lo;
     }
 
     pub fn jmp(&mut self, mode: AddressMode) {
@@ -259,7 +263,7 @@ impl CPU {
         let result = value >> 1;
 
         if addr != 0 {
-            self.memory[addr as usize] = result;
+            self.memory_bus.cpu_write(addr, result);
         } else {
             self.a = result;
         }
@@ -275,20 +279,18 @@ impl CPU {
     }
 
     pub fn php(&mut self) {
-        self.push_status()
+        self.push_status();
     }
 
     pub fn pla(&mut self) {
         self.a = self.pop();
-        self.status.set(StatusFlags::NEGATIVE, self.a & 0x80 != 0);
-        self.status.set(StatusFlags::ZERO, self.a == 0);
+        self.update_zero_and_negative_flags(self.a);
     }
 
     pub fn plp(&mut self) {
         self.status = StatusFlags::from_bits_truncate(self.pop());
         // Clear the BREAK and UNUSED flags
-        self.status.remove(StatusFlags::BREAK);
-        self.status.remove(StatusFlags::UNUSED);
+        self.status.remove(StatusFlags::BREAK | StatusFlags::UNUSED);
     }
 
     pub fn rti(&mut self) {
@@ -326,5 +328,101 @@ impl CPU {
 
     pub fn txs(&mut self) {
         self.sp = self.x;
+    }
+
+    pub fn get_operand(&mut self, mode: AddressMode) -> (u16, u8) {
+        match mode {
+            AddressMode::Immediate => (0, self.fetch_byte()),
+            AddressMode::ZeroPage => {
+                let addr = self.fetch_byte() as u16;
+                (addr, self.memory_bus.cpu_read(addr))
+            }
+            AddressMode::ZeroPageX => {
+                let addr = self.fetch_byte().wrapping_add(self.x) as u16;
+                (addr, self.memory_bus.cpu_read(addr))
+            }
+            AddressMode::ZeroPageY => {
+                let addr = self.fetch_byte().wrapping_add(self.y) as u16;
+                (addr, self.memory_bus.cpu_read(addr))
+            }
+            AddressMode::Absolute => {
+                let addr = self.fetch_word();
+                (addr, self.memory_bus.cpu_read(addr))
+            }
+            AddressMode::AbsoluteX => {
+                let addr = self.fetch_word().wrapping_add(self.x as u16);
+                (addr, self.memory_bus.cpu_read(addr))
+            }
+            AddressMode::AbsoluteY => {
+                let addr = self.fetch_word().wrapping_add(self.y as u16);
+                (addr, self.memory_bus.cpu_read(addr))
+            }
+            AddressMode::IndirectX => {
+                let base = self.fetch_byte().wrapping_add(self.x);
+                let lo = self.memory_bus.cpu_read(base as u16) as u16;
+                let hi = self.memory_bus.cpu_read(base.wrapping_add(1) as u16) as u16;
+                let addr = (hi << 8) | lo;
+                (addr, self.memory_bus.cpu_read(addr))
+            }
+            AddressMode::IndirectY => {
+                let base = self.fetch_byte();
+                let lo = self.memory_bus.cpu_read(base as u16) as u16;
+                let hi = self.memory_bus.cpu_read(base.wrapping_add(1) as u16) as u16;
+                let addr = ((hi << 8) | lo).wrapping_add(self.y as u16);
+                (addr, self.memory_bus.cpu_read(addr))
+            }
+            AddressMode::Relative => {
+                let offset = self.fetch_byte() as i8;
+                let addr = self.pc.wrapping_add(offset as u16);
+                (addr, self.memory_bus.cpu_read(addr))
+            }
+            AddressMode::Accumulator => (0, self.a),
+            _ => panic!("Addressing mode not supported"),
+        }
+    }
+
+    fn update_zero_and_negative_flags(&mut self, value: u8) {
+        self.status.set(StatusFlags::ZERO, value == 0);
+        self.status.set(StatusFlags::NEGATIVE, value & 0x80 != 0);
+    }
+
+    fn update_carry_flag(&mut self, sum: u16) {
+        if sum > 0xFF {
+            self.status.insert(StatusFlags::CARRY);
+        } else {
+            self.status.remove(StatusFlags::CARRY);
+        }
+    }
+
+    fn update_overflow_flag(&mut self, value: u8, result: u8) {
+        let overflow = ((self.a ^ value) & StatusFlags::NEGATIVE.bits() == 0)
+            && ((self.a ^ result) & StatusFlags::NEGATIVE.bits() != 0);
+        if overflow {
+            self.status.insert(StatusFlags::OVERFLOW);
+        } else {
+            self.status.remove(StatusFlags::OVERFLOW);
+        }
+    }
+
+    fn rotate_right(&mut self, value: u8) -> u8 {
+        let carry = if self.status.contains(StatusFlags::CARRY) {
+            1
+        } else {
+            0
+        };
+        let result = (value >> 1) | (carry << 7);
+        self.status.set(StatusFlags::CARRY, value & 0x01 != 0);
+        result
+    }
+
+    fn rotate_left(&mut self, value: u8) -> u8 {
+        let carry = if self.status.contains(StatusFlags::CARRY) {
+            1
+        } else {
+            0
+        };
+        let result = (value << 1) | carry;
+        self.status.set(StatusFlags::CARRY, value & 0x80 != 0);
+        result
     }
 }
