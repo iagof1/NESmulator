@@ -19,6 +19,7 @@ pub enum AddressMode {
 macro_rules! logical {
     ($fn_name:ident, $op:tt) => {
         pub fn $fn_name(&mut self, mode: AddressMode) {
+            println!("{} {:?}: A: {}, X: {}, Y: {}", stringify!($fn_name), mode, self.a, self.x, self.y);
             let (_, value) = self.get_operand(mode);
             self.a = self.a $op value;
             self.update_zero_and_negative_flags(self.a);
@@ -32,6 +33,14 @@ macro_rules! load_register {
             let (_, value) = self.get_operand(mode);
             self.$reg = value;
             self.update_zero_and_negative_flags(self.$reg);
+            println!(
+                "{} A: {}, X: {}, Y: {}, OPERAND: {}",
+                stringify!($fn_name),
+                self.a,
+                self.x,
+                self.y,
+                value,
+            );
         }
     };
 }
@@ -39,6 +48,14 @@ macro_rules! load_register {
 macro_rules! branch {
     ($fn_name:ident, $flag:ident, $condition:expr) => {
         pub fn $fn_name(&mut self, mode: AddressMode) {
+            println!(
+                "{} {:?}: A: {}, X: {}, Y: {}",
+                stringify!($fn_name),
+                mode,
+                self.a,
+                self.x,
+                self.y
+            );
             match mode {
                 AddressMode::Relative => {
                     let offset = self.fetch_byte() as i8;
@@ -58,6 +75,14 @@ macro_rules! branch {
 macro_rules! compare {
     ($fn_name:ident, $reg:ident) => {
         pub fn $fn_name(&mut self, mode: AddressMode) {
+            println!(
+                "{} {:?}: A: {}, X: {}, Y: {}",
+                stringify!($fn_name),
+                mode,
+                self.a,
+                self.x,
+                self.y
+            );
             let (_, value) = self.get_operand(mode);
 
             let result = self.$reg.wrapping_sub(value);
@@ -71,11 +96,19 @@ macro_rules! compare {
 macro_rules! rotate {
     ($fn_name:ident, $rotate_fn:ident, $carry_check:expr) => {
         pub fn $fn_name(&mut self, mode: AddressMode) {
+            println!(
+                "{} {:?}: A: {}, X: {}, Y: {}",
+                stringify!($fn_name),
+                mode,
+                self.a,
+                self.x,
+                self.y
+            );
             let (addr, value) = self.get_operand(mode);
             let result = self.$rotate_fn(value);
 
             if addr != 0 {
-                self.memory_bus.cpu_write(addr, result);
+                self.memory_bus.unclocked_write_byte(addr, result);
             } else {
                 self.a = result;
             }
@@ -90,8 +123,16 @@ macro_rules! rotate {
 macro_rules! store {
     ($fn_name:ident, $reg:ident) => {
         pub fn $fn_name(&mut self, mode: AddressMode) {
+            println!(
+                "{} {:?}: A: {}, X: {}, Y: {}",
+                stringify!($fn_name),
+                mode,
+                self.a,
+                self.x,
+                self.y
+            );
             let (addr, _) = self.get_operand(mode);
-            self.memory_bus.cpu_write(addr, self.$reg);
+            self.memory_bus.unclocked_write_byte(addr, self.$reg);
         }
     };
 }
@@ -99,6 +140,13 @@ macro_rules! store {
 macro_rules! transfer {
     ($fn_name:ident, $source:ident, $dest:ident) => {
         pub fn $fn_name(&mut self) {
+            println!(
+                "{}: A: {}, X: {}, Y: {}",
+                stringify!($fn_name),
+                self.a,
+                self.x,
+                self.y
+            );
             self.$dest = self.$source;
             self.update_zero_and_negative_flags(self.$dest);
         }
@@ -108,14 +156,29 @@ macro_rules! transfer {
 macro_rules! increment {
     (inc, $reg:ident) => {
         pub fn inc(&mut self, mode: AddressMode) {
+            println!(
+                "{} {:?}: A: {}, X: {}, Y: {}",
+                stringify!(inc),
+                mode,
+                self.a,
+                self.x,
+                self.y
+            );
             let (addr, mut value) = self.get_operand(mode);
             value = value.wrapping_add(1);
-            self.memory_bus.cpu_write(addr, value);
+            self.memory_bus.unclocked_write_byte(addr, value);
             self.update_zero_and_negative_flags(value);
         }
     };
     ($fn_name:ident, $reg:ident) => {
         pub fn $fn_name(&mut self) {
+            println!(
+                "{}: A: {}, X: {}, Y: {}",
+                stringify!($fn_name),
+                self.a,
+                self.x,
+                self.y
+            );
             self.$reg = self.$reg.wrapping_add(1);
             self.update_zero_and_negative_flags(self.$reg);
         }
@@ -125,14 +188,29 @@ macro_rules! increment {
 macro_rules! decrement {
     (dec, $reg:ident) => {
         pub fn dec(&mut self, mode: AddressMode) {
+            println!(
+                "{} {:?}: A: {}, X: {}, Y: {}",
+                stringify!(dec),
+                mode,
+                self.a,
+                self.x,
+                self.y
+            );
             let (addr, mut value) = self.get_operand(mode);
             value = value.wrapping_sub(1);
-            self.memory_bus.cpu_write(addr, value);
+            self.memory_bus.unclocked_write_byte(addr, value);
             self.update_zero_and_negative_flags(value);
         }
     };
     ($fn_name:ident, $reg:ident) => {
         pub fn $fn_name(&mut self) {
+            println!(
+                "{}: A: {}, X: {}, Y: {}",
+                stringify!($fn_name),
+                self.a,
+                self.x,
+                self.y
+            );
             self.$reg = self.$reg.wrapping_sub(1);
             self.update_zero_and_negative_flags(self.$reg);
         }
@@ -142,6 +220,13 @@ macro_rules! decrement {
 macro_rules! set_flag {
     ($fn_name:ident, $flag:ident, $value:expr) => {
         pub fn $fn_name(&mut self) {
+            println!(
+                "{}: A: {}, X: {}, Y: {}",
+                stringify!($fn_name),
+                self.a,
+                self.x,
+                self.y
+            );
             self.status.set(StatusFlags::$flag, $value);
         }
     };
@@ -218,7 +303,7 @@ impl CPU {
         self.status.set(StatusFlags::CARRY, (value & 0x80) != 0);
         value <<= 1;
         if addr != 0 {
-            self.memory_bus.cpu_write(addr, value);
+            self.memory_bus.unclocked_write_byte(addr, value);
         } else {
             self.a = value;
         }
@@ -240,8 +325,8 @@ impl CPU {
         self.push_status();
 
         // Read the interrupt vector address from 0xFFFE/0xFFFF
-        let lo = self.memory_bus.cpu_read(0xFFFE) as u16;
-        let hi = self.memory_bus.cpu_read(0xFFFF) as u16;
+        let lo = self.memory_bus.unclocked_read_byte(0xFFFE) as u16;
+        let hi = self.memory_bus.unclocked_read_byte(0xFFFF) as u16;
         self.pc = (hi << 8) | lo;
     }
 
@@ -262,7 +347,7 @@ impl CPU {
         let result = value >> 1;
 
         if addr != 0 {
-            self.memory_bus.cpu_write(addr, result);
+            self.memory_bus.unclocked_write_byte(addr, result);
         } else {
             self.a = result;
         }
@@ -334,46 +419,52 @@ impl CPU {
             AddressMode::Immediate => (0, self.fetch_byte()),
             AddressMode::ZeroPage => {
                 let addr = self.fetch_byte() as u16;
-                (addr, self.memory_bus.cpu_read(addr))
+                (addr, self.memory_bus.unclocked_read_byte(addr))
             }
             AddressMode::ZeroPageX => {
                 let addr = self.fetch_byte().wrapping_add(self.x) as u16;
-                (addr, self.memory_bus.cpu_read(addr))
+                (addr, self.memory_bus.unclocked_read_byte(addr))
             }
             AddressMode::ZeroPageY => {
                 let addr = self.fetch_byte().wrapping_add(self.y) as u16;
-                (addr, self.memory_bus.cpu_read(addr))
+                (addr, self.memory_bus.unclocked_read_byte(addr))
             }
             AddressMode::Absolute => {
                 let addr = self.fetch_word();
-                (addr, self.memory_bus.cpu_read(addr))
+                (addr, self.memory_bus.unclocked_read_byte(addr))
             }
             AddressMode::AbsoluteX => {
                 let addr = self.fetch_word().wrapping_add(self.x as u16);
-                (addr, self.memory_bus.cpu_read(addr))
+                (addr, self.memory_bus.unclocked_read_byte(addr))
             }
             AddressMode::AbsoluteY => {
                 let addr = self.fetch_word().wrapping_add(self.y as u16);
-                (addr, self.memory_bus.cpu_read(addr))
+                (addr, self.memory_bus.unclocked_read_byte(addr))
             }
             AddressMode::IndirectX => {
                 let base = self.fetch_byte().wrapping_add(self.x);
-                let lo = self.memory_bus.cpu_read(base as u16) as u16;
-                let hi = self.memory_bus.cpu_read(base.wrapping_add(1) as u16) as u16;
+                let lo = self.memory_bus.unclocked_read_byte(base as u16) as u16;
+                let hi = self
+                    .memory_bus
+                    .unclocked_read_byte(base.wrapping_add(1) as u16)
+                    as u16;
                 let addr = (hi << 8) | lo;
-                (addr, self.memory_bus.cpu_read(addr))
+                (addr, self.memory_bus.unclocked_read_byte(addr))
             }
             AddressMode::IndirectY => {
                 let base = self.fetch_byte();
-                let lo = self.memory_bus.cpu_read(base as u16) as u16;
-                let hi = self.memory_bus.cpu_read(base.wrapping_add(1) as u16) as u16;
+                let lo = self.memory_bus.unclocked_read_byte(base as u16) as u16;
+                let hi = self
+                    .memory_bus
+                    .unclocked_read_byte(base.wrapping_add(1) as u16)
+                    as u16;
                 let addr = ((hi << 8) | lo).wrapping_add(self.y as u16);
-                (addr, self.memory_bus.cpu_read(addr))
+                (addr, self.memory_bus.unclocked_read_byte(addr))
             }
             AddressMode::Relative => {
                 let offset = self.fetch_byte() as i8;
                 let addr = self.pc.wrapping_add(offset as u16);
-                (addr, self.memory_bus.cpu_read(addr))
+                (addr, self.memory_bus.unclocked_read_byte(addr))
             }
             AddressMode::Accumulator => (0, self.a),
             _ => panic!("Addressing mode not supported"),

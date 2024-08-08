@@ -1,7 +1,10 @@
-use crate::bus::MemoryBus;
-use crate::instructions::AddressMode;
-use crate::nes_file::Mirroring;
+pub mod instructions;
+
+use crate::bus::Bus;
+use crate::rom::Mirroring;
+
 use bitflags::bitflags;
+use instructions::*;
 
 bitflags! {
     pub struct StatusFlags: u8 {
@@ -24,7 +27,7 @@ pub struct CPU {
     pub pc: u16,
     pub sp: u8,
     pub status: StatusFlags,
-    pub memory_bus: MemoryBus,
+    pub memory_bus: Bus,
 }
 
 impl CPU {
@@ -37,7 +40,7 @@ impl CPU {
             pc: 0,
             sp: 0xFD,
             status: StatusFlags::from_bits_truncate(0x34),
-            memory_bus: MemoryBus::new(prg_rom, chr_rom, mirroring),
+            memory_bus: Bus::new(prg_rom, chr_rom, mirroring),
         };
 
         cpu.pc = cpu.read_reset_vector();
@@ -45,19 +48,18 @@ impl CPU {
     }
 
     fn read_reset_vector(&mut self) -> u16 {
-        let lo = self.memory_bus.cpu_read(0xFFFC) as u16;
-        let hi = self.memory_bus.cpu_read(0xFFFD) as u16;
-        (hi << 8) | lo
+        self.memory_bus.read_word(0xFFFC)
     }
 
     pub fn push(&mut self, value: u8) {
-        self.memory_bus.cpu_write(0x0100 + self.sp as u16, value);
+        self.memory_bus
+            .unclocked_write_byte(0x0100 + self.sp as u16, value);
         self.sp = self.sp.wrapping_sub(1);
     }
 
     pub fn pop(&mut self) -> u8 {
         self.sp = self.sp.wrapping_add(1);
-        self.memory_bus.cpu_read(0x0100 + self.sp as u16)
+        self.memory_bus.unclocked_read_byte(0x0100 + self.sp as u16)
     }
 
     pub fn push_status(&mut self) {
@@ -72,19 +74,13 @@ impl CPU {
     }
 
     pub fn fetch_byte(&mut self) -> u8 {
-        let byte = self.memory_bus.cpu_read(self.pc);
+        let byte = self.memory_bus.unclocked_read_byte(self.pc);
         self.pc += 1;
         byte
     }
 
     pub fn read_byte(&mut self, addr: u16) -> u8 {
-        self.memory_bus.cpu_read(addr)
-    }
-
-    pub fn read_word(&mut self, addr: u16) -> u16 {
-        let lo = self.read_byte(addr) as u16;
-        let hi = self.read_byte(addr + 1) as u16;
-        (hi << 8) | lo
+        self.memory_bus.unclocked_read_byte(addr)
     }
 
     pub fn fetch_word(&mut self) -> u16 {
@@ -97,7 +93,7 @@ impl CPU {
         self.push_word(self.pc);
         self.push_status();
         self.status.insert(StatusFlags::INTERRUPT);
-        self.pc = self.memory_bus.cpu_read_word(0xFFFA);
+        self.pc = self.memory_bus.read_word(0xFFFA);
     }
 
     pub fn get_cycle_count(&self, opcode: u8) -> u16 {
@@ -257,14 +253,7 @@ impl CPU {
         }
     }
 
-    pub fn run(&mut self) {
-        let opcode = self.fetch_byte();
-        let _ = self.cycles.wrapping_add(self.get_cycle_count(opcode));
-        println!(
-            "Opcode: {:#02X} PC: {:#04X} A: {:#02X} X: {:#02X} Y: {:#02X}",
-            opcode, self.pc, self.a, self.x, self.y
-        );
-
+    fn execute_opcode(&mut self, opcode: u8) {
         match opcode {
             // ADC
             0x69 => self.adc(AddressMode::Immediate),
@@ -462,5 +451,11 @@ impl CPU {
             0x98 => self.tya(),
             _ => self.nop(),
         }
+    }
+
+    pub fn run(&mut self) {
+        let opcode = self.fetch_byte();
+        let _ = self.cycles.wrapping_add(self.get_cycle_count(opcode));
+        self.execute_opcode(opcode)
     }
 }

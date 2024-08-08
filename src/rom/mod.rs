@@ -46,7 +46,13 @@ impl NesFile {
         file.read_exact(&mut prg_rom)?;
 
         let mut chr_rom = vec![0; chr_rom_size];
-        file.read_exact(&mut chr_rom)?;
+        if chr_rom_size > 0 {
+            file.read_exact(&mut chr_rom)?;
+        }
+
+        println!("CHR ROM size: {} bytes", chr_rom_size);
+        println!("PRG ROM size: {} bytes", prg_rom_size);
+        println!("Mapper: {}", mapper);
 
         Ok(NesFile {
             prg_rom,
