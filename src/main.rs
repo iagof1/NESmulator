@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let texture_creator = canvas.texture_creator();
 
     // Load the NES file
-    let nes_file = NesFile::load("src/samples/Super Mario Bros. (World).nes")?;
+    let nes_file = NesFile::load("src/samples/Pac-Man (USA) (Namco).nes")?;
     // Initialize CPU and PPU
     let mut cpu = CPU::new(
         nes_file.prg_rom.clone(),
