@@ -1,76 +1,85 @@
+use nes::bus::Bus;
 use nes::cpu::CPU;
-use nes::rom::NesFile;
+use nes::ppu::PPU;
+use nes::render;
+use nes::render::frame::Frame;
+use nes::rom::Rom;
 
 use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
+use sdl2::pixels::Color;
 use sdl2::pixels::PixelFormatEnum;
-use sdl2::rect::Rect;
-use sdl2::render::Canvas;
-use sdl2::video::Window;
-use sdl2::Sdl;
-use std::error::Error;
-use std::time::Duration;
+use std::collections::HashMap;
 
-fn initialize_sdl() -> (Sdl, Canvas<Window>) {
-    let sdl_context = sdl2::init().expect("Failed to initialize SDL2");
-    let video_subsystem = sdl_context
-        .video()
-        .expect("Failed to initialize video subsystem");
-
+fn main() {
+    let sdl_context = sdl2::init().unwrap();
+    let video_subsystem = sdl_context.video().unwrap();
     let window = video_subsystem
-        .window("NES Emulator", 256, 240)
+        .window("Tile viewer", (256.0 * 3.0) as u32, (240.0 * 3.0) as u32)
         .position_centered()
         .build()
-        .expect("Failed to create window");
+        .unwrap();
 
-    let canvas = window
-        .into_canvas()
-        .accelerated()
-        .build()
-        .expect("Failed to create canvas");
+    let mut canvas = window.into_canvas().present_vsync().build().unwrap();
+    let mut event_pump = sdl_context.event_pump().unwrap();
+    canvas.set_scale(3.0, 3.0).unwrap();
 
-    (sdl_context, canvas)
-}
+    let creator = canvas.texture_creator();
+    let mut texture = creator
+        .create_texture_target(PixelFormatEnum::RGB24, 256, 240)
+        .unwrap();
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // Initialize SDL2
-    let (sdl_context, mut canvas) = initialize_sdl();
-    let texture_creator = canvas.texture_creator();
+    //load the game
+    let bytes: Vec<u8> = std::fs::read("src/samples/Balloon Fight (USA).nes").unwrap();
+    let rom = Rom::new(&bytes).unwrap();
 
-    // Load the NES file
-    let nes_file = NesFile::load("src/samples/Pac-Man (USA) (Namco).nes")?;
-    // Initialize CPU and PPU
-    let mut cpu = CPU::new(
-        nes_file.prg_rom.clone(),
-        nes_file.chr_rom.clone(),
-        nes_file.mirroring,
-    );
+    let mut frame = Frame::new();
 
-    // Main loop
-    let mut texture = texture_creator
-        .create_texture_streaming(PixelFormatEnum::RGBA8888, 256, 240)
-        .expect("Failed to create texture");
+    // let mut key_map = HashMap::new();
+    // key_map.insert(Keycode::Down, joypad::JoypadButton::DOWN);
+    // key_map.insert(Keycode::Up, joypad::JoypadButton::UP);
+    // key_map.insert(Keycode::Right, joypad::JoypadButton::RIGHT);
+    // key_map.insert(Keycode::Left, joypad::JoypadButton::LEFT);
+    // key_map.insert(Keycode::Space, joypad::JoypadButton::SELECT);
+    // key_map.insert(Keycode::Return, joypad::JoypadButton::START);
+    // key_map.insert(Keycode::A, joypad::JoypadButton::BUTTON_A);
+    // key_map.insert(Keycode::S, joypad::JoypadButton::BUTTON_B);
 
-    'running: loop {
-        for event in sdl_context.event_pump().unwrap().poll_iter() {
+    // run the game cycle
+    let bus = Bus::new(rom, move |ppu: &PPU| {
+        render::render(ppu, &mut frame);
+        texture.update(None, &frame.data, 256 * 2 * 3).unwrap();
+
+        canvas.copy(&texture, None, None).unwrap();
+
+        canvas.present();
+        for event in event_pump.poll_iter() {
             match event {
-                Event::Quit { .. } => break 'running,
-                _ => {}
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => std::process::exit(0),
+
+                // Event::KeyDown { keycode, .. } => {
+                //     if let Some(key) = key_map.get(&keycode.unwrap_or(Keycode::Ampersand)) {
+                //         joypad.set_button_pressed_status(*key, true);
+                //     }
+                // }
+                // Event::KeyUp { keycode, .. } => {
+                //     if let Some(key) = key_map.get(&keycode.unwrap_or(Keycode::Ampersand)) {
+                //         joypad.set_button_pressed_status(*key, false);
+                //     }
+                // }
+                _ => { /* do nothing */ }
             }
         }
+    });
 
-        cpu.run();
-        let frame = cpu.memory_bus.ppu.render_frame();
-
-        texture
-            .update(None, &frame, 256 * 4)
-            .expect("Failed to update texture");
-        canvas
-            .copy(&texture, None, Some(Rect::new(0, 0, 256, 240)))
-            .expect("Failed to copy texture to canvas");
-        canvas.present();
-
-        ::std::thread::sleep(Duration::from_millis(16));
-    }
-
-    Ok(())
+    let mut cpu = CPU::new(bus);
+    cpu.reset();
+    // cpu.run();
+    cpu.run_with_callback(|cpu| {
+        // println!("{}", trace(cpu));
+    });
 }

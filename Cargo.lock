@@ -38,6 +38,7 @@ version = "0.1.0"
 dependencies = [
  "bitfield",
  "bitflags",
+ "lazy_static",
  "sdl2",
 ]
 

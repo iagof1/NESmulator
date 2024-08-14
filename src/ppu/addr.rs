@@ -1,27 +1,52 @@
-use bitfield::bitfield;
-
-bitfield! {
-    pub struct AddrReg(u16);
-    impl Debug;
-    pub coarse_x, set_coarse_x: 4, 0;
-    pub coarse_y, set_coarse_y: 9, 5;
-    pub nametable_x, set_nametable_x: 10;
-    pub nametable_y, set_nametable_y: 11;
-    pub fine_y, set_fine_y: 14, 12;
-    pub u16, address, _: 13,  0;
-    pub u8, high_byte, set_high_byte: 13, 8;
-    pub u8, low_byte, set_low_byte: 7, 0;
-    pub u16, get, _: 14,  0;
-}
-
-impl Default for AddrReg {
-    fn default() -> Self {
-        AddrReg(0)
-    }
+pub struct AddrReg {
+    value: (u8, u8),
+    hi_ptr: bool,
 }
 
 impl AddrReg {
-    pub fn increment(&mut self, amount: u16) {
-        self.0 = self.0.wrapping_add(amount);
+    pub fn new() -> Self {
+        AddrReg {
+            value: (0, 0), // high byte first, lo byte second
+            hi_ptr: true,
+        }
+    }
+
+    fn set(&mut self, data: u16) {
+        self.value.0 = (data >> 8) as u8;
+        self.value.1 = (data & 0xff) as u8;
+    }
+
+    pub fn update(&mut self, data: u8) {
+        if self.hi_ptr {
+            self.value.0 = data;
+        } else {
+            self.value.1 = data;
+        }
+
+        if self.get() > 0x3fff {
+            //mirror down addr above 0x3fff
+            self.set(self.get() & 0b11111111111111);
+        }
+
+        self.hi_ptr = !self.hi_ptr;
+    }
+
+    pub fn increment(&mut self, inc: u8) {
+        let lo = self.value.1;
+        self.value.1 = self.value.1.wrapping_add(inc);
+        if lo > self.value.1 {
+            self.value.0 = self.value.0.wrapping_add(1);
+        }
+        if self.get() > 0x3fff {
+            self.set(self.get() & 0b11111111111111); //mirror down addr above 0x3fff
+        }
+    }
+
+    pub fn reset_latch(&mut self) {
+        self.hi_ptr = true;
+    }
+
+    pub fn get(&self) -> u16 {
+        ((self.value.0 as u16) << 8) | (self.value.1 as u16)
     }
 }
