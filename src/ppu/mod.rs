@@ -13,7 +13,6 @@ pub struct PPU {
     pub vram: [u8; 0x800],
     pub palette_table: [u8; 0x20],
     pub oam_data: [u8; 0x100],
-
     pub chr_rom: Vec<u8>,
     pub mirroring: Mirroring,
     pub registers: Registers,
@@ -23,13 +22,17 @@ pub struct PPU {
 }
 
 impl PPU {
+    pub fn new_empty_rom() -> Self {
+        PPU::new(vec![0; 2048], Mirroring::Horizontal)
+    }
+
     pub fn new(chr_rom: Vec<u8>, mirroring: Mirroring) -> PPU {
         PPU {
             vram: [0; 0x800],
             mirroring,
-            palette_table: [0; 32],
-            oam_data: [0; 256],
             chr_rom: chr_rom,
+            palette_table: [0; 0x20],
+            oam_data: [0; 0x100],
             registers: Registers::new(),
 
             cycles: 0,
@@ -48,6 +51,13 @@ impl PPU {
             (Mirroring::Horizontal, 2) => vram_index - 0x400,
             (Mirroring::Horizontal, 3) => vram_index - 0x800,
             _ => vram_index,
+        }
+    }
+
+    pub fn write_oam_dma(&mut self, data: &[u8; 256]) {
+        for x in data.iter() {
+            self.registers.oam_data[self.registers.oam_addr as usize] = *x;
+            self.registers.oam_addr = self.registers.oam_addr.wrapping_add(1);
         }
     }
 

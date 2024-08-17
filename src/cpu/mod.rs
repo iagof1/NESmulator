@@ -27,14 +27,14 @@ mod interrupt {
 
     pub(super) const NMI: Interrupt = Interrupt {
         itype: InterruptType::NMI,
-        vector_addr: 0xfffA,
+        vector_addr: 0xFFFA,
         b_flag_mask: 0b00100000,
         cpu_cycles: 2,
     };
 
     pub(super) const BRK: Interrupt = Interrupt {
         itype: InterruptType::BRK,
-        vector_addr: 0xfffe,
+        vector_addr: 0xFFFE,
         b_flag_mask: 0b00110000,
         cpu_cycles: 1,
     };
@@ -348,6 +348,24 @@ impl<'a> CPU<'a> {
 
         self.bus.tick(interrupt.cpu_cycles);
         self.pc = self.bus.read_word(interrupt.vector_addr);
+    }
+
+    pub fn step(&mut self) {
+        let ref opcodes: HashMap<u8, &'static opcodes::OpCode> = *opcodes::OPCODES_MAP;
+
+        let opcode = opcodes
+            .get(&self.fetch_byte())
+            .expect(&format!("Opcode is not recognized"));
+
+        let pc_state = self.pc;
+        println!("{:#02X} {}", self.pc, opcode.mnemonic);
+        self.execute_opcode(opcode.code);
+
+        self.bus.tick(opcode.cycles as u8);
+
+        if pc_state == self.pc {
+            self.pc += (opcode.len - 1) as u16;
+        }
     }
 
     pub fn run(&mut self) {

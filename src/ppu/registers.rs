@@ -10,6 +10,8 @@ pub struct Registers {
     pub status: StatusReg,
     pub addr: AddrReg,
     pub scroll: ScrollReg,
+    pub oam_addr: u8,
+    pub oam_data: [u8; 0x100],
     pub nmi_interrupt: Option<u8>,
     pub internal_data_buf: u8,
 }
@@ -22,6 +24,8 @@ impl Registers {
             status: StatusReg::new(),
             addr: AddrReg::new(),
             scroll: ScrollReg::new(),
+            oam_addr: 0,
+            oam_data: [0; 64 * 4],
             internal_data_buf: 0,
             nmi_interrupt: None,
         }
@@ -37,6 +41,19 @@ impl Registers {
 
     pub fn write_to_mask(&mut self, value: u8) {
         self.mask.update(value);
+    }
+
+    pub fn write_to_oam_data(&mut self, value: u8) {
+        self.oam_data[self.oam_addr as usize] = value;
+        self.oam_addr = self.oam_addr.wrapping_add(1);
+    }
+
+    pub fn write_to_oam_addr(&mut self, addr: u8) {
+        self.oam_addr = addr;
+    }
+
+    pub fn read_oam_data(&mut self) -> u8 {
+        self.oam_data[self.oam_addr as usize]
     }
 
     pub fn write_control(&mut self, value: u8) {

@@ -44,12 +44,9 @@ impl<'a> Bus<'a> {
                 let mirror_down_addr = addr & 0b00000111_11111111;
                 self.ram[mirror_down_addr as usize]
             }
-            0x2000 | 0x2001 | 0x2003 | 0x2005 | 0x2006 | 0x4014 => {
-                // panic!("Attempt to read from write-only PPU address {:x}", addr);
-                0
-            }
+            0x2000 | 0x2001 | 0x2003 | 0x2005 | 0x2006 | 0x4014 => 0,
             0x2002 => self.ppu.registers.read_status(),
-            // 0x2004 => self.ppu.registers.read_oam_data(),
+            0x2004 => self.ppu.registers.read_oam_data(),
             0x2007 => self.ppu.read_data(),
 
             0x4000..=0x4015 => {
@@ -95,10 +92,10 @@ impl<'a> Bus<'a> {
             0x2002 => panic!("attempt to write to PPU status register"),
 
             0x2003 => {
-                // self.ppu.registers.write_to_oam_addr(data);
+                self.ppu.registers.write_to_oam_addr(data);
             }
             0x2004 => {
-                // self.ppu.registers.write_to_oam_data(data);
+                self.ppu.registers.write_to_oam_data(data);
             }
             0x2005 => {
                 self.ppu.registers.write_to_scroll(data);
@@ -122,25 +119,18 @@ impl<'a> Bus<'a> {
                 // ignore joypad 2
             }
 
-            // https://wiki.nesdev.com/w/index.php/PPU_programmer_reference#OAM_DMA_.28.244014.29_.3E_write
             0x4014 => {
-                // let mut buffer: [u8; 256] = [0; 256];
-                // let hi: u16 = (data as u16) << 8;
-                // for i in 0..256u16 {
-                //     buffer[i as usize] = self.mem_read(hi + i);
-                // }
-
-                // self.ppu.write_oam_dma(&buffer);
-
-                // todo: handle this eventually
-                // let add_cycles: u16 = if self.cycles % 2 == 1 { 514 } else { 513 };
-                // self.tick(add_cycles); //todo this will cause weird effects as PPU will have 513/514 * 3 ticks
+                let mut buffer: [u8; 0x100] = [0; 0x100];
+                let hi: u16 = (data as u16) << 8;
+                for i in 0..256u16 {
+                    buffer[i as usize] = self.mem_read(hi + i)
+                }
+                self.ppu.write_oam_dma(&buffer);
             }
 
             0x2008..=PPU_REGISTERS_MIRRORS_END => {
                 let mirror_down_addr = addr & 0b00100000_00000111;
                 self.mem_write(mirror_down_addr, data);
-                // todo!("PPU is not supported yet");
             }
             0x8000..=0xFFFF => panic!("Attempt to write to Cartridge ROM space: {:x}", addr),
 

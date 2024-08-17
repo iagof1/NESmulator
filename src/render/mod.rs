@@ -194,19 +194,19 @@ pub fn render(ppu: &PPU, frame: &mut Frame) {
                 match (flip_horizontal, flip_vertical) {
                     (false, false) => {
                         frame.set_pixel(tile_x + x, tile_y + y, rgb);
-                        // frame.set_pixel(tile_x + x, tile_y + y +250, rgb);
+                        frame.set_pixel(tile_x + x, tile_y + y + 250, rgb);
                     }
                     (true, false) => {
                         frame.set_pixel(tile_x + 7 - x, tile_y + y, rgb);
-                        // frame.set_pixel(tile_x + 7 - x , tile_y + y + 250, rgb);
+                        frame.set_pixel(tile_x + 7 - x, tile_y + y + 250, rgb);
                     }
                     (false, true) => {
                         frame.set_pixel(tile_x + x, tile_y + 7 - y, rgb);
-                        // frame.set_pixel(tile_x + x, tile_y + 7 - y + 250, rgb);
+                        frame.set_pixel(tile_x + x, tile_y + 7 - y + 250, rgb);
                     }
                     (true, true) => {
                         frame.set_pixel(tile_x + 7 - x, tile_y + 7 - y, rgb);
-                        // frame.set_pixel(tile_x + 7 - x, tile_y + 7 - y+250, rgb);
+                        frame.set_pixel(tile_x + 7 - x, tile_y + 7 - y + 250, rgb);
                     }
                 }
             }
