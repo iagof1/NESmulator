@@ -48,8 +48,6 @@ A few sample ROMs are included under `src/samples/` for quick testing.
 ## Screenshots
 
 <img width="777" height="803" alt="image" src="https://github.com/user-attachments/assets/118b94e3-a23a-4b2a-8b79-9aa1326cf6ca" />
-<img width="777" height="803" alt="image" src="https://github.com/user-attachments/assets/c25a8932-1b75-4a25-b572-ddb5a7ee11e5" />
-
 
 ## Project Layout
 
