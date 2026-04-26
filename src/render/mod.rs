@@ -122,55 +122,59 @@ pub fn render(ppu: &PPU, frame: &mut Frame) {
             | (Mirroring::Vertical, 0x2C00)
             | (Mirroring::Horizontal, 0x2800)
             | (Mirroring::Horizontal, 0x2C00) => (&ppu.vram[0x400..0x800], &ppu.vram[0..0x400]),
-            (_, _) => {
-                panic!("Not supported mirroring type {:?}", ppu.mirroring);
-            }
+            (_, _) => (&ppu.vram[0..0x400], &ppu.vram[0..0x400]),
         };
 
-    render_name_table(
-        ppu,
-        frame,
-        main_nametable,
-        Rect::new(scroll_x, scroll_y, 256, 240),
-        -(scroll_x as isize),
-        -(scroll_y as isize),
-    );
-    if scroll_x > 0 {
+    if ppu.registers.mask.show_background() {
         render_name_table(
             ppu,
             frame,
-            second_nametable,
-            Rect::new(0, 0, scroll_x, 240),
-            (256 - scroll_x) as isize,
-            0,
+            main_nametable,
+            Rect::new(scroll_x, scroll_y, 256, 240),
+            -(scroll_x as isize),
+            -(scroll_y as isize),
         );
-    } else if scroll_y > 0 {
-        render_name_table(
-            ppu,
-            frame,
-            second_nametable,
-            Rect::new(0, 0, 256, scroll_y),
-            0,
-            (240 - scroll_y) as isize,
-        );
+        if scroll_x > 0 {
+            render_name_table(
+                ppu,
+                frame,
+                second_nametable,
+                Rect::new(0, 0, scroll_x, 240),
+                (256 - scroll_x) as isize,
+                0,
+            );
+        } else if scroll_y > 0 {
+            render_name_table(
+                ppu,
+                frame,
+                second_nametable,
+                Rect::new(0, 0, 256, scroll_y),
+                0,
+                (240 - scroll_y) as isize,
+            );
+        }
     }
 
-    for i in (0..ppu.oam_data.len()).step_by(4).rev() {
-        let tile_idx = ppu.oam_data[i + 1] as u16;
-        let tile_x = ppu.oam_data[i + 3] as usize;
-        let tile_y = ppu.oam_data[i] as usize;
+    if !ppu.registers.mask.show_sprites() {
+        return;
+    }
 
-        let flip_vertical = if ppu.oam_data[i + 2] >> 7 & 1 == 1 {
+    for i in (0..ppu.oam_data().len()).step_by(4).rev() {
+        let tile_idx = ppu.oam_data()[i + 1] as u16;
+        let tile_x = ppu.oam_data()[i + 3] as usize;
+        let tile_y = ppu.oam_data()[i] as usize;
+
+        let flip_vertical = if ppu.oam_data()[i + 2] >> 7 & 1 == 1 {
             true
         } else {
             false
         };
-        let flip_horizontal = if ppu.oam_data[i + 2] >> 6 & 1 == 1 {
+        let flip_horizontal = if ppu.oam_data()[i + 2] >> 6 & 1 == 1 {
             true
         } else {
             false
         };
-        let pallette_idx = ppu.oam_data[i + 2] & 0b11;
+        let pallette_idx = ppu.oam_data()[i + 2] & 0b11;
         let sprite_palette = sprite_palette(ppu, pallette_idx);
         let bank: u16 = ppu.registers.ctrl.sprt_pattern_addr();
 
@@ -192,22 +196,10 @@ pub fn render(ppu: &PPU, frame: &mut Frame) {
                     _ => panic!("can't be"),
                 };
                 match (flip_horizontal, flip_vertical) {
-                    (false, false) => {
-                        frame.set_pixel(tile_x + x, tile_y + y, rgb);
-                        frame.set_pixel(tile_x + x, tile_y + y + 250, rgb);
-                    }
-                    (true, false) => {
-                        frame.set_pixel(tile_x + 7 - x, tile_y + y, rgb);
-                        frame.set_pixel(tile_x + 7 - x, tile_y + y + 250, rgb);
-                    }
-                    (false, true) => {
-                        frame.set_pixel(tile_x + x, tile_y + 7 - y, rgb);
-                        frame.set_pixel(tile_x + x, tile_y + 7 - y + 250, rgb);
-                    }
-                    (true, true) => {
-                        frame.set_pixel(tile_x + 7 - x, tile_y + 7 - y, rgb);
-                        frame.set_pixel(tile_x + 7 - x, tile_y + 7 - y + 250, rgb);
-                    }
+                    (false, false) => frame.set_pixel(tile_x + x, tile_y + y, rgb),
+                    (true, false) => frame.set_pixel(tile_x + 7 - x, tile_y + y, rgb),
+                    (false, true) => frame.set_pixel(tile_x + x, tile_y + 7 - y, rgb),
+                    (true, true) => frame.set_pixel(tile_x + 7 - x, tile_y + 7 - y, rgb),
                 }
             }
         }

@@ -12,7 +12,6 @@ use registers::Registers;
 pub struct PPU {
     pub vram: [u8; 0x800],
     pub palette_table: [u8; 0x20],
-    pub oam_data: [u8; 0x100],
     pub chr_rom: Vec<u8>,
     pub mirroring: Mirroring,
     pub registers: Registers,
@@ -32,12 +31,15 @@ impl PPU {
             mirroring,
             chr_rom: chr_rom,
             palette_table: [0; 0x20],
-            oam_data: [0; 0x100],
             registers: Registers::new(),
 
             cycles: 0,
             scanline: 0,
         }
+    }
+
+    pub fn oam_data(&self) -> &[u8; 0x100] {
+        &self.registers.oam_data
     }
 
     pub fn mirror_vram_addr(&self, addr: u16) -> u16 {
@@ -61,16 +63,25 @@ impl PPU {
         }
     }
 
+    fn palette_index(addr: u16) -> usize {
+        let mut idx = (addr - 0x3F00) as usize & 0x1F;
+        // 0x3F10/14/18/1C mirror 0x3F00/04/08/0C
+        if idx == 0x10 || idx == 0x14 || idx == 0x18 || idx == 0x1C {
+            idx -= 0x10;
+        }
+        idx
+    }
+
     pub fn read_data(&mut self) -> u8 {
         let addr = self.registers.addr.get();
         self.registers
             .addr
             .increment(self.registers.ctrl.vram_addr_increment());
-        println!("PPU: Reading data from addr: {:#X}", addr);
         match addr {
             0x0000..=0x1FFF => {
                 let result = self.registers.internal_data_buf;
-                self.registers.internal_data_buf = self.chr_rom[addr as usize];
+                self.registers.internal_data_buf =
+                    *self.chr_rom.get(addr as usize).unwrap_or(&0);
                 result
             }
             0x2000..=0x2FFF => {
@@ -79,34 +90,33 @@ impl PPU {
                 self.registers.internal_data_buf = self.vram[mirrored_addr as usize];
                 result
             }
-            0x3000..=0x3EFF => unimplemented!(),
-            0x3F10 | 0x3F14 | 0x3F18 | 0x3F1C => {
-                let mirrored_addr = addr - 0x10;
-                self.palette_table[(mirrored_addr - 0x3F00) as usize]
+            0x3000..=0x3EFF => {
+                let result = self.registers.internal_data_buf;
+                let mirrored_addr = self.mirror_vram_addr(addr - 0x1000);
+                self.registers.internal_data_buf = self.vram[mirrored_addr as usize];
+                result
             }
-            0x3F00..=0x3FFF => self.palette_table[(addr - 0x3F00) as usize],
-            _ => panic!("Unimplemented PPU read at address: {:#X}", addr),
+            0x3F00..=0x3FFF => self.palette_table[Self::palette_index(addr)],
+            _ => 0,
         }
     }
 
     pub fn write_to_data(&mut self, value: u8) {
         let addr = self.registers.addr.get();
-        println!("PPU: Writing data to addr: {:#X}", addr);
         match addr {
-            0x0000..=0x1FFF => println!("Attempt to write to chr rom space: {}", addr),
+            0x0000..=0x1FFF => {} // CHR ROM read-only
             0x2000..=0x2FFF => {
                 let mirrored_addr = self.mirror_vram_addr(addr);
                 self.vram[mirrored_addr as usize] = value;
             }
-            0x3000..=0x3EFF => unimplemented!(),
-            0x3F10 | 0x3F14 | 0x3F18 | 0x3F1C => {
-                let addr_mirror = addr - 0x10;
-                self.palette_table[(addr_mirror - 0x3F00) as usize] = value;
+            0x3000..=0x3EFF => {
+                let mirrored_addr = self.mirror_vram_addr(addr - 0x1000);
+                self.vram[mirrored_addr as usize] = value;
             }
             0x3F00..=0x3FFF => {
-                self.palette_table[(addr - 0x3F00) as usize] = value;
+                self.palette_table[Self::palette_index(addr)] = value;
             }
-            _ => panic!("Unexpected write to mirrored space: {}", addr),
+            _ => {}
         }
         self.registers
             .addr
@@ -115,12 +125,13 @@ impl PPU {
 
     pub fn tick(&mut self, cycles: u8) -> bool {
         self.cycles += cycles as usize;
-        if self.cycles >= 341 {
+        let mut new_frame = false;
+        while self.cycles >= 341 {
             if self.is_sprite_0_hit(self.cycles) {
                 self.registers.status.set_sprite_zero_hit(true);
             }
 
-            self.cycles = self.cycles - 341;
+            self.cycles -= 341;
             self.scanline += 1;
 
             if self.scanline == 241 {
@@ -136,18 +147,25 @@ impl PPU {
                 self.registers.nmi_interrupt = None;
                 self.registers.status.set_sprite_zero_hit(false);
                 self.registers.status.reset_vblank_status();
-                return true;
+                new_frame = true;
             }
         }
-        return false;
+        new_frame
+    }
+
+    pub fn scanline(&self) -> u16 {
+        self.scanline
+    }
+    pub fn cycle(&self) -> usize {
+        self.cycles
     }
     pub fn poll_nmi_interrupt(&mut self) -> Option<u8> {
         self.registers.nmi_interrupt.take()
     }
 
     fn is_sprite_0_hit(&self, cycle: usize) -> bool {
-        let y = self.oam_data[0] as usize;
-        let x = self.oam_data[3] as usize;
+        let y = self.registers.oam_data[0] as usize;
+        let x = self.registers.oam_data[3] as usize;
         (y == self.scanline as usize) && x <= cycle && self.registers.mask.show_sprites()
     }
 }

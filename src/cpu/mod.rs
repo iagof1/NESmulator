@@ -11,6 +11,7 @@ const STACK: u16 = 0x0100;
 const STACK_RESET: u8 = 0xFD;
 
 mod interrupt {
+    #[allow(dead_code)]
     #[derive(PartialEq, Eq)]
     pub enum InterruptType {
         NMI,
@@ -32,6 +33,7 @@ mod interrupt {
         cpu_cycles: 2,
     };
 
+    #[allow(dead_code)]
     pub(super) const BRK: Interrupt = Interrupt {
         itype: InterruptType::BRK,
         vector_addr: 0xFFFE,
@@ -130,10 +132,7 @@ impl<'a> CPU<'a> {
     }
 
     pub fn nmi(&mut self) {
-        self.push_word(self.pc);
-        self.push_status();
-        self.status.insert(StatusFlags::INTERRUPT);
-        self.pc = self.bus.read_word(0xFFFA);
+        self.interrupt(interrupt::NMI);
     }
 
     fn execute_opcode(&mut self, opcode: u8) {
@@ -333,15 +332,103 @@ impl<'a> CPU<'a> {
             0x8A => self.txa(),
             0x9A => self.txs(),
             0x98 => self.tya(),
-            _ => self.nop(),
+
+            // Unofficial: *NOP (multi-byte forms — operand consumed via opcode.len)
+            0x80 | 0x82 | 0x89 | 0xC2 | 0xE2 => self.nop(),
+            0x04 | 0x44 | 0x64 => self.nop(),
+            0x14 | 0x34 | 0x54 | 0x74 | 0xD4 | 0xF4 => self.nop(),
+            0x0C => self.nop(),
+            0x1C | 0x3C | 0x5C | 0x7C | 0xDC | 0xFC => self.nop_read(AddressMode::AbsoluteX),
+            0x1A | 0x3A | 0x5A | 0x7A | 0xDA | 0xFA => self.nop(),
+            0x02 | 0x12 | 0x22 | 0x32 | 0x42 | 0x52 | 0x62 | 0x72 | 0x92 | 0xB2 | 0xD2 | 0xF2 => self.nop(),
+
+            // *SBC (same as SBC)
+            0xEB => self.sbc(AddressMode::Immediate),
+
+            // *LAX = LDA + LDX
+            0xA7 => self.lax(AddressMode::ZeroPage),
+            0xB7 => self.lax(AddressMode::ZeroPageY),
+            0xAF => self.lax(AddressMode::Absolute),
+            0xBF => self.lax(AddressMode::AbsoluteY),
+            0xA3 => self.lax(AddressMode::IndirectX),
+            0xB3 => self.lax(AddressMode::IndirectY),
+
+            // *SAX = store A & X
+            0x87 => self.sax(AddressMode::ZeroPage),
+            0x97 => self.sax(AddressMode::ZeroPageY),
+            0x8F => self.sax(AddressMode::Absolute),
+            0x83 => self.sax(AddressMode::IndirectX),
+
+            // *DCP = DEC + CMP
+            0xC7 => self.dcp(AddressMode::ZeroPage),
+            0xD7 => self.dcp(AddressMode::ZeroPageX),
+            0xCF => self.dcp(AddressMode::Absolute),
+            0xDF => self.dcp(AddressMode::AbsoluteX),
+            0xDB => self.dcp(AddressMode::AbsoluteY),
+            0xC3 => self.dcp(AddressMode::IndirectX),
+            0xD3 => self.dcp(AddressMode::IndirectY),
+
+            // *ISB/*ISC = INC + SBC
+            0xE7 => self.isb(AddressMode::ZeroPage),
+            0xF7 => self.isb(AddressMode::ZeroPageX),
+            0xEF => self.isb(AddressMode::Absolute),
+            0xFF => self.isb(AddressMode::AbsoluteX),
+            0xFB => self.isb(AddressMode::AbsoluteY),
+            0xE3 => self.isb(AddressMode::IndirectX),
+            0xF3 => self.isb(AddressMode::IndirectY),
+
+            // *SLO = ASL + ORA
+            0x07 => self.slo(AddressMode::ZeroPage),
+            0x17 => self.slo(AddressMode::ZeroPageX),
+            0x0F => self.slo(AddressMode::Absolute),
+            0x1F => self.slo(AddressMode::AbsoluteX),
+            0x1B => self.slo(AddressMode::AbsoluteY),
+            0x03 => self.slo(AddressMode::IndirectX),
+            0x13 => self.slo(AddressMode::IndirectY),
+
+            // *SRE = LSR + EOR
+            0x47 => self.sre(AddressMode::ZeroPage),
+            0x57 => self.sre(AddressMode::ZeroPageX),
+            0x4F => self.sre(AddressMode::Absolute),
+            0x5F => self.sre(AddressMode::AbsoluteX),
+            0x5B => self.sre(AddressMode::AbsoluteY),
+            0x43 => self.sre(AddressMode::IndirectX),
+            0x53 => self.sre(AddressMode::IndirectY),
+
+            // *RLA = ROL + AND
+            0x27 => self.rla(AddressMode::ZeroPage),
+            0x37 => self.rla(AddressMode::ZeroPageX),
+            0x2F => self.rla(AddressMode::Absolute),
+            0x3F => self.rla(AddressMode::AbsoluteX),
+            0x3B => self.rla(AddressMode::AbsoluteY),
+            0x23 => self.rla(AddressMode::IndirectX),
+            0x33 => self.rla(AddressMode::IndirectY),
+
+            // *RRA = ROR + ADC
+            0x67 => self.rra(AddressMode::ZeroPage),
+            0x77 => self.rra(AddressMode::ZeroPageX),
+            0x6F => self.rra(AddressMode::Absolute),
+            0x7F => self.rra(AddressMode::AbsoluteX),
+            0x7B => self.rra(AddressMode::AbsoluteY),
+            0x63 => self.rra(AddressMode::IndirectX),
+            0x73 => self.rra(AddressMode::IndirectY),
+
+            // *ANC, *ALR, *ARR, *AXS
+            0x0B | 0x2B => self.anc(),
+            0x4B => self.alr(),
+            0x6B => self.arr(),
+            0xCB => self.axs(),
+
+            // Highly unstable — treat as NOP (operands consumed via opcode.len)
+            0xAB | 0x8B | 0xBB | 0x9B | 0x93 | 0x9F | 0x9E | 0x9C => self.nop(),
         }
     }
 
     fn interrupt(&mut self, interrupt: interrupt::Interrupt) {
         self.push_word(self.pc);
         let mut flag = self.status.clone();
-        flag.set(StatusFlags::BREAK, interrupt.b_flag_mask & 0b010000 == 1);
-        flag.set(StatusFlags::UNUSED, interrupt.b_flag_mask & 0b100000 == 1);
+        flag.set(StatusFlags::BREAK, interrupt.b_flag_mask & 0b0001_0000 != 0);
+        flag.set(StatusFlags::UNUSED, interrupt.b_flag_mask & 0b0010_0000 != 0);
 
         self.push(flag.bits);
         self.status.insert(StatusFlags::INTERRUPT);
@@ -358,7 +445,6 @@ impl<'a> CPU<'a> {
             .expect(&format!("Opcode is not recognized"));
 
         let pc_state = self.pc;
-        println!("{:#02X} {}", self.pc, opcode.mnemonic);
         self.execute_opcode(opcode.code);
 
         self.bus.tick(opcode.cycles as u8);
@@ -390,7 +476,6 @@ impl<'a> CPU<'a> {
                 .expect(&format!("Opcode is not recognized"));
 
             let pc_state = self.pc;
-            println!("{:#02X} {}", self.pc, opcode.mnemonic);
             self.execute_opcode(opcode.code);
 
             self.bus.tick(opcode.cycles as u8);

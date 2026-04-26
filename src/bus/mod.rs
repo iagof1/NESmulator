@@ -1,29 +1,31 @@
+use crate::joypad::Joypad;
 use crate::ppu::PPU;
 use crate::rom::Rom;
 
 const RAM: u16 = 0x0000;
 const RAM_MIRRORS_END: u16 = 0x1FFF;
-const PPU_REGISTERS: u16 = 0x2000;
 const PPU_REGISTERS_MIRRORS_END: u16 = 0x3FFF;
 
 pub struct Bus<'call> {
     pub ram: [u8; 0x800],
     pub ppu: PPU,
+    pub joypad1: Joypad,
     prg_rom: Vec<u8>,
     cycles: usize,
-    gameloop_callback: Box<dyn FnMut(&PPU) + 'call>,
+    gameloop_callback: Box<dyn FnMut(&PPU, &mut Joypad) + 'call>,
 }
 
 impl<'a> Bus<'a> {
     pub fn new<'call, F>(rom: Rom, gameloop_callback: F) -> Bus<'call>
     where
-        F: FnMut(&PPU) + 'call,
+        F: FnMut(&PPU, &mut Joypad) + 'call,
     {
         let ppu = PPU::new(rom.chr_rom, rom.mirroring);
 
         Bus {
             ram: [0; 0x800],
             ppu: ppu,
+            joypad1: Joypad::new(),
             prg_rom: rom.prg_rom,
             cycles: 0,
             gameloop_callback: Box::from(gameloop_callback),
@@ -31,11 +33,12 @@ impl<'a> Bus<'a> {
     }
 
     fn read_prg_rom(&self, addr: u16) -> u8 {
-        let mut prg_rom_addr = addr - 0x8000;
-        if self.prg_rom.len() == 0x4000 && prg_rom_addr >= 0x4000 {
-            prg_rom_addr = prg_rom_addr % 0x4000;
+        let len = self.prg_rom.len();
+        if len == 0 {
+            return 0;
         }
-        self.prg_rom[prg_rom_addr as usize]
+        let prg_rom_addr = (addr - 0x8000) as usize % len;
+        self.prg_rom[prg_rom_addr]
     }
 
     pub fn mem_read(&mut self, addr: u16) -> u8 {
@@ -54,15 +57,9 @@ impl<'a> Bus<'a> {
                 0
             }
 
-            0x4016 => {
-                // self.joypad1.read()
-                0
-            }
+            0x4016 => self.joypad1.read(),
 
-            0x4017 => {
-                // ignore joypad 2
-                0
-            }
+            0x4017 => 0,
             0x2008..=PPU_REGISTERS_MIRRORS_END => {
                 let mirror_down_addr = addr & 0b00100000_00000111;
                 self.mem_read(mirror_down_addr)
@@ -112,7 +109,7 @@ impl<'a> Bus<'a> {
             }
 
             0x4016 => {
-                // ignore joypad 1
+                self.joypad1.write(data);
             }
 
             0x4017 => {
@@ -134,9 +131,7 @@ impl<'a> Bus<'a> {
             }
             0x8000..=0xFFFF => panic!("Attempt to write to Cartridge ROM space: {:x}", addr),
 
-            _ => {
-                println!("Ignoring mem write-access at {:x}", addr);
-            }
+            _ => {}
         }
     }
 
@@ -149,12 +144,12 @@ impl<'a> Bus<'a> {
     pub fn tick(&mut self, cycles: u8) {
         self.cycles += cycles as usize;
 
-        let nmi_before = self.ppu.registers.nmi_interrupt.is_some();
+        let in_vblank_before = self.ppu.registers.status.is_in_vblank();
         self.ppu.tick(cycles * 3);
-        let nmi_after = self.ppu.registers.nmi_interrupt.is_some();
+        let in_vblank_after = self.ppu.registers.status.is_in_vblank();
 
-        if !nmi_before && nmi_after {
-            (self.gameloop_callback)(&self.ppu);
+        if !in_vblank_before && in_vblank_after {
+            (self.gameloop_callback)(&self.ppu, &mut self.joypad1);
         }
     }
 }

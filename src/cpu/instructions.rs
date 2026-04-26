@@ -219,6 +219,7 @@ impl<'a> CPU<'a> {
         self.status.set(StatusFlags::CARRY, (value & 0x80) != 0);
         value <<= 1;
         self.a = value;
+        self.update_zero_and_negative_flags(self.a);
     }
 
     pub fn asl(&mut self, mode: AddressMode) {
@@ -361,15 +362,16 @@ impl<'a> CPU<'a> {
         let (addr, page_cross) = self.get_operand(mode);
         let value = self.bus.mem_read(addr);
 
-        let carry = !self.status.contains(StatusFlags::CARRY) as u8;
-        let result = self.a.wrapping_sub(value).wrapping_sub(carry);
+        let carry_in = self.status.contains(StatusFlags::CARRY) as u16;
+        let a = self.a as u16;
+        let v = value as u16;
+        let diff = a.wrapping_sub(v).wrapping_sub(1 - carry_in);
+        let result = diff as u8;
 
-        self.status
-            .set(StatusFlags::CARRY, self.a >= (value + carry));
+        self.status.set(StatusFlags::CARRY, diff < 0x100);
         self.status.set(StatusFlags::ZERO, result == 0);
         self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
-
-        let overflow = ((self.a ^ result) & 0x80 != 0) && ((self.a ^ value) & 0x80 != 0);
+        let overflow = ((self.a ^ value) & (self.a ^ result) & 0x80) != 0;
         self.status.set(StatusFlags::OVERFLOW, overflow);
 
         self.a = result;
@@ -383,6 +385,143 @@ impl<'a> CPU<'a> {
         self.sp = self.x;
     }
 
+    pub fn nop_read(&mut self, mode: AddressMode) {
+        let (_, page_cross) = self.get_operand(mode);
+        if page_cross {
+            self.bus.tick(1);
+        }
+    }
+
+    pub fn lax(&mut self, mode: AddressMode) {
+        let (addr, page_cross) = self.get_operand(mode);
+        let value = self.bus.mem_read(addr);
+        self.a = value;
+        self.x = value;
+        self.update_zero_and_negative_flags(self.a);
+        if page_cross {
+            self.bus.tick(1);
+        }
+    }
+
+    pub fn sax(&mut self, mode: AddressMode) {
+        let (addr, _) = self.get_operand(mode);
+        self.bus.mem_write(addr, self.a & self.x);
+    }
+
+    pub fn dcp(&mut self, mode: AddressMode) {
+        let (addr, _) = self.get_operand(mode);
+        let value = self.bus.mem_read(addr).wrapping_sub(1);
+        self.bus.mem_write(addr, value);
+        let result = self.a.wrapping_sub(value);
+        self.status.set(StatusFlags::CARRY, self.a >= value);
+        self.status.set(StatusFlags::ZERO, self.a == value);
+        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
+    }
+
+    pub fn isb(&mut self, mode: AddressMode) {
+        let (addr, _) = self.get_operand(mode);
+        let value = self.bus.mem_read(addr).wrapping_add(1);
+        self.bus.mem_write(addr, value);
+
+        let carry_in = self.status.contains(StatusFlags::CARRY) as u16;
+        let a = self.a as u16;
+        let v = value as u16;
+        let diff = a.wrapping_sub(v).wrapping_sub(1 - carry_in);
+        let result = diff as u8;
+
+        self.status.set(StatusFlags::CARRY, diff < 0x100);
+        self.status.set(StatusFlags::ZERO, result == 0);
+        self.status.set(StatusFlags::NEGATIVE, result & 0x80 != 0);
+        let overflow = ((self.a ^ value) & (self.a ^ result) & 0x80) != 0;
+        self.status.set(StatusFlags::OVERFLOW, overflow);
+        self.a = result;
+    }
+
+    pub fn slo(&mut self, mode: AddressMode) {
+        let (addr, _) = self.get_operand(mode);
+        let mut value = self.bus.mem_read(addr);
+        self.status.set(StatusFlags::CARRY, value & 0x80 != 0);
+        value <<= 1;
+        self.bus.mem_write(addr, value);
+        self.a |= value;
+        self.update_zero_and_negative_flags(self.a);
+    }
+
+    pub fn sre(&mut self, mode: AddressMode) {
+        let (addr, _) = self.get_operand(mode);
+        let mut value = self.bus.mem_read(addr);
+        self.status.set(StatusFlags::CARRY, value & 0x01 != 0);
+        value >>= 1;
+        self.bus.mem_write(addr, value);
+        self.a ^= value;
+        self.update_zero_and_negative_flags(self.a);
+    }
+
+    pub fn rla(&mut self, mode: AddressMode) {
+        let (addr, _) = self.get_operand(mode);
+        let value = self.bus.mem_read(addr);
+        let result = self.rotate_left(value);
+        self.bus.mem_write(addr, result);
+        self.a &= result;
+        self.update_zero_and_negative_flags(self.a);
+    }
+
+    pub fn rra(&mut self, mode: AddressMode) {
+        let (addr, _) = self.get_operand(mode);
+        let value = self.bus.mem_read(addr);
+        let result = self.rotate_right(value);
+        self.bus.mem_write(addr, result);
+
+        let carry = self.status.contains(StatusFlags::CARRY) as u16;
+        let sum = self.a as u16 + result as u16 + carry;
+        let final_a = sum as u8;
+        self.update_carry_flag(sum);
+        let overflow = ((self.a ^ final_a) & (result ^ final_a) & 0x80) != 0;
+        self.status.set(StatusFlags::OVERFLOW, overflow);
+        self.a = final_a;
+        self.update_zero_and_negative_flags(self.a);
+    }
+
+    pub fn anc(&mut self) {
+        let (addr, _) = self.get_operand(AddressMode::Immediate);
+        let value = self.bus.mem_read(addr);
+        self.a &= value;
+        self.update_zero_and_negative_flags(self.a);
+        self.status.set(StatusFlags::CARRY, self.a & 0x80 != 0);
+    }
+
+    pub fn alr(&mut self) {
+        let (addr, _) = self.get_operand(AddressMode::Immediate);
+        let value = self.bus.mem_read(addr);
+        self.a &= value;
+        self.status.set(StatusFlags::CARRY, self.a & 0x01 != 0);
+        self.a >>= 1;
+        self.update_zero_and_negative_flags(self.a);
+    }
+
+    pub fn arr(&mut self) {
+        let (addr, _) = self.get_operand(AddressMode::Immediate);
+        let value = self.bus.mem_read(addr);
+        self.a &= value;
+        let carry_in = self.status.contains(StatusFlags::CARRY) as u8;
+        self.a = (self.a >> 1) | (carry_in << 7);
+        self.update_zero_and_negative_flags(self.a);
+        let bit6 = (self.a >> 6) & 1;
+        let bit5 = (self.a >> 5) & 1;
+        self.status.set(StatusFlags::CARRY, bit6 == 1);
+        self.status.set(StatusFlags::OVERFLOW, bit6 ^ bit5 == 1);
+    }
+
+    pub fn axs(&mut self) {
+        let (addr, _) = self.get_operand(AddressMode::Immediate);
+        let value = self.bus.mem_read(addr);
+        let result = (self.a & self.x).wrapping_sub(value);
+        self.status
+            .set(StatusFlags::CARRY, (self.a & self.x) >= value);
+        self.x = result;
+        self.update_zero_and_negative_flags(self.x);
+    }
+
     pub fn get_operand(&mut self, mode: AddressMode) -> (u16, bool) {
         match mode {
             AddressMode::Immediate => (self.pc, false),
@@ -394,7 +533,7 @@ impl<'a> CPU<'a> {
             }
             AddressMode::ZeroPageY => {
                 let pos = self.bus.mem_read(self.pc);
-                let addr = pos.wrapping_add(self.x) as u16;
+                let addr = pos.wrapping_add(self.y) as u16;
                 (addr, false)
             }
             AddressMode::Absolute => (self.bus.read_word(self.pc), false),
@@ -424,6 +563,14 @@ impl<'a> CPU<'a> {
                 let deref_base = (hi as u16) << 8 | (lo as u16);
                 let deref = deref_base.wrapping_add(self.y as u16);
                 (deref, page_cross(deref, deref_base))
+            }
+            AddressMode::Indirect => {
+                let ptr = self.bus.read_word(self.pc);
+                let lo = self.bus.mem_read(ptr) as u16;
+                // 6502 page-cross bug: hi byte read from same page
+                let hi_addr = (ptr & 0xFF00) | ((ptr.wrapping_add(1)) & 0x00FF);
+                let hi = self.bus.mem_read(hi_addr) as u16;
+                ((hi << 8) | lo, false)
             }
             _ => panic!("Addressing mode not supported"),
         }

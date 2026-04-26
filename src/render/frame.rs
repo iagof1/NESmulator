@@ -3,12 +3,12 @@ pub struct Frame {
 }
 
 impl Frame {
-    const WIDTH: usize = 256 * 2;
-    const HIGHT: usize = 240;
+    pub const WIDTH: usize = 256;
+    pub const HEIGHT: usize = 240;
 
     pub fn new() -> Self {
         Frame {
-            data: vec![0; (Frame::WIDTH) * (Frame::HIGHT) * 3],
+            data: vec![0; Frame::WIDTH * Frame::HEIGHT * 3],
         }
     }
 
